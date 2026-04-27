@@ -1,0 +1,13 @@
+# Core
+claude-agent-sdk
+vibevoice
+torch
+transformers
+huggingface_hub
+
+# Article extraction
+beautifulsoup4
+requests
+
+# Audio conversion (requires ffmpeg on PATH for MP3)
+pydub
