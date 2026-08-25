@@ -21,8 +21,6 @@ pub struct Config {
     pub voices: VoiceSettings,
     #[serde(default)]
     pub device: DeviceSettings,
-    #[serde(default)]
-    pub appearance: AppearanceSettings,
 }
 
 /// What the next run asks of `article2pod.py`.
@@ -61,28 +59,10 @@ pub struct DeviceSettings {
     pub gpu_mask: String,
 }
 
-/// How the window is painted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AppearanceSettings {
-    /// Let the desktop show through the ground and the chrome.
-    ///
-    /// On by default. Worth a switch rather than a constant: translucency is
-    /// only half the effect, and on a machine with no compositor blur behind
-    /// it the result is raw desktop windows read through the frame rather
-    /// than a wash.
-    #[serde(default = "default_translucent")]
-    pub translucent: bool,
-}
-
 /// The host counts `article2pod.py --hosts` accepts.
 const HOST_CHOICES: [u8; 3] = [2, 3, 4];
 
 fn default_hosts() -> u8 { 2 }
-
-/// Named rather than leaning on `bool`'s own `false`: a `config.toml` written
-/// before this key existed deserializes the missing field through this, and
-/// `#[serde(default)]` would turn the feature off on upgrade in silence.
-fn default_translucent() -> bool { true }
 
 impl Default for Config {
     fn default() -> Self {
@@ -90,7 +70,6 @@ impl Default for Config {
             run: RunSettings::default(),
             voices: VoiceSettings::default(),
             device: DeviceSettings::default(),
-            appearance: AppearanceSettings::default(),
         }
     }
 }
@@ -113,15 +92,6 @@ impl Default for VoiceSettings {
 impl Default for DeviceSettings {
     fn default() -> Self {
         Self { gpu_mask: String::new() }
-    }
-}
-
-impl Default for AppearanceSettings {
-    /// Written out rather than derived. A missing `[appearance]` section is
-    /// filled from here, so a derived `false` would opt every existing
-    /// install out of the feature the moment it shipped.
-    fn default() -> Self {
-        Self { translucent: default_translucent() }
     }
 }
 
@@ -284,10 +254,6 @@ mod tests {
         assert!(!config.run.auto_continue, "the script-review gate is on until asked otherwise");
         assert!(config.voices.selected.is_empty(), "an empty list defers to the CLI's roster");
         assert_eq!(config.device.gpu_mask, "", "an empty mask leaves ZE_AFFINITY_MASK unset");
-        assert!(
-            config.appearance.translucent,
-            "the window lets the desktop through until the switch says otherwise"
-        );
     }
 
     #[test]
@@ -302,9 +268,6 @@ mod tests {
                 selected: vec!["alice".into(), "carter".into(), "maya".into()],
             },
             device: DeviceSettings { gpu_mask: "1".into() },
-            // The non-default value on purpose: a `true` here would round-trip
-            // identically whether it was loaded or quietly defaulted.
-            appearance: AppearanceSettings { translucent: false },
         };
         written.save_to(&path).expect("save");
 
@@ -360,21 +323,24 @@ mod tests {
     }
 
     #[test]
-    fn a_config_written_before_appearance_existed_still_opens_translucent() {
-        let path = temp_dir("pre-appearance").join("config.toml");
-        // Every config.toml on disk today looks like this: no [appearance] at
-        // all. Serde fills a missing section from `Default`, so a derived one
-        // — or a bare `#[serde(default)]` on the field — turns the feature off
-        // on upgrade without a word.
-        std::fs::write(&path, "[run]\nhosts = 2\n\n[device]\ngpu_mask = \"1\"\n")
-            .expect("write");
+    fn a_config_written_by_the_translucency_builds_still_opens() {
+        // This is the literal file those builds left on disk: every drag of the
+        // opacity slider called `save_config`, which rewrote config.toml with
+        // an `[appearance]` section. The window is opaque again and the section
+        // is gone from the struct, so this is now an unknown *section* rather
+        // than an unknown key — and it must load rather than take the whole
+        // file down the corrupt path.
+        let path = temp_dir("post-translucency").join("config.toml");
+        std::fs::write(
+            &path,
+            "[run]\nhosts = 3\n\n[device]\ngpu_mask = \"1\"\n\n\
+             [appearance]\nopacity = 100\n",
+        )
+        .expect("write");
 
         let config = load_from(&path).expect("load");
-        assert!(
-            config.appearance.translucent,
-            "an upgrade must not silently opt the window out of translucency"
-        );
-        assert_eq!(config.device.gpu_mask, "1", "the sections the file does have still load");
+        assert_eq!(config.run.hosts, 3, "the sections this build still has take effect");
+        assert_eq!(config.device.gpu_mask, "1", "and none of them are lost to the stale one");
     }
 
     #[test]

@@ -241,33 +241,49 @@ fn no_auxin_palette_survives() {
 }
 
 #[test]
-fn translucency_reaches_the_ground_and_the_chrome_but_never_a_card() {
-    let block = rules(CSS)
-        .into_iter()
-        // `rules` folds everything at brace depth 0 into the selector, so the
-        // comment above the block comes along with it — match the tail.
-        .find(|(selector, _)| selector.trim_end().ends_with(".app-container.translucent"))
-        .map(|(_, block)| block)
-        .expect(
-            "the translucent ground is one CSS block; without it the switch in \
-             Settings toggles a class nothing styles",
-        );
-
+fn the_ground_and_the_chrome_are_opaque() {
+    // The inverse of a guard this file used to carry. Translucency was built
+    // twice — a switch, then a slider — and withdrawn both times for the same
+    // reason: on a transparent XWayland window, WebKitGTK repaints a
+    // translucent region by blending over the previous frame rather than over
+    // a cleared buffer, so the outgoing page stays visible underneath the
+    // incoming one until a hover event damages the region and forces a real
+    // repaint. Confirmed by bisecting on the opacity itself — clean at 100%,
+    // ghosting at 88% — and unfixed by promoting .content to its own
+    // compositing layer. See the README.
+    //
+    // Nothing about that failure is visible in Rust: it compiles, it renders,
+    // and it looks like a design choice until you switch pages. So the check
+    // is on the CSS values themselves.
     for token in ["--bg:", "--bg-chrome:"] {
-        assert!(
-            block.contains(token),
-            "the translucent block must redefine {token} — it is what carries \
-             the effect to the ground and the frame"
-        );
+        let mut seen = false;
+        for (selector, block) in rules(CSS) {
+            for line in block.lines() {
+                let Some(value) = line.trim().strip_prefix(token) else {
+                    continue;
+                };
+                seen = true;
+                assert!(
+                    !value.contains("rgba(") && !value.contains("alpha"),
+                    "{selector} makes {token} translucent ({value}). That ground \
+                     ghosts the outgoing page into the incoming one on this \
+                     stack; the window surface is transparent for the corners, \
+                     and the page painted on it has to be opaque."
+                );
+            }
+        }
+        assert!(seen, "{token} must still be defined — it paints the ground and the frame");
     }
 
-    assert!(
-        !block.contains("--bg-surface"),
-        "--bg-surface paints the cards, the inputs and the buttons, which is \
-         where every word in the app is set. Making it translucent gives back \
-         the whole contrast pass at once, and it reads as a design choice \
-         rather than as a regression."
-    );
+    // The two properties the slider drove. Their absence is what says the
+    // feature was withdrawn rather than merely turned down to 100%.
+    for property in ["--ground-alpha", "--chrome-alpha"] {
+        assert!(
+            !CSS.contains(property),
+            "{property} is left over from the opacity slider. Reviving it revives \
+             the ghosting with it."
+        );
+    }
 }
 
 #[test]

@@ -105,8 +105,18 @@ inherits the same pinned interpreter.
 
 ```bash
 cd gui
-cargo run            # or: dx serve --platform desktop
+dx serve --platform desktop
 ```
+
+**`cargo run` does not work, and its failure looks like a broken app rather
+than a broken launch.** Dioxus resolves bundled assets from the executable's
+own directory — `dioxus_asset_resolver::native::get_asset_root` reads
+`current_exe().parent()` and has no working-directory or `CARGO_MANIFEST_DIR`
+fallback. For `target/debug/article2pod-gui` that directory is `target/debug/`,
+which has no `assets/`, so the stylesheet, the fonts and the icon all 404 and
+the window opens as unstyled HTML with a broken-image badge and no background.
+`dx serve` stages the assets beside the binary it builds, which is what makes
+the paths resolve.
 
 It works in two stages with a review gate between them: write the script, edit
 it, then synthesize. A toggle skips the gate and runs the CLI's one-shot path
@@ -116,7 +126,9 @@ than merely silent. Cancel signals the whole process group, which is what stops
 the `claude` grandchild along with it.
 
 The Run page is a drop target, a toggle and a button, and nothing else: drop a
-PDF or text file on it, pick one with Browse, or paste a URL. Everything set
+PDF or text file on it, drag in a link from a browser, or pick a file with
+Browse. There is no field to type into — whatever is chosen shows as a chip
+with the full path or link under it. Everything set
 once — hosts, voices, the GPU, the run log — lives in Settings. Tone and length
 are not exposed and are not passed; the CLI's own defaults are what the GUI
 means by them, and omitting `--length` is what selects "let the article decide"
@@ -131,38 +143,58 @@ The window is undecorated and opens at 880×680 with no resize grips of its
 own; resize it with the window manager's own gesture (`Alt`/`Super` +
 right-drag on X11).
 
-The window is also translucent: the ground between cards and the frame around
-them let the desktop through, while cards, inputs and buttons stay opaque so
-nothing that has to be read sits over moving wallpaper. The blur behind it has
-to come from the compositor. GNOME exposes no blur-behind protocol to clients,
-and CSS `backdrop-filter` reaches only the page's own content, never the
-desktop behind the window. On GNOME the extension that supplies it is Blur My
-Shell:
+**The window is opaque, and has to stay that way.** The window *surface* is
+transparent (`with_transparent(true)`, plus `html, body, #main { background:
+transparent }` in `styles.css`) and that part is load-bearing — it is what lets
+`.app-container` paint its own rounded corners instead of the webview painting
+a white square over them. What must stay opaque is the page painted on that
+surface: `--bg` and `--bg-chrome` are solid hex, and a stylesheet test enforces
+it. Beamer is built the same way and is the reference for it.
 
-```bash
-BMS=~/.local/share/gnome-shell/extensions/blur-my-shell@aunetx/schemas
-APPS=org.gnome.shell.extensions.blur-my-shell.applications
+Translucency was built twice and withdrawn twice. Both dead ends are recorded
+here because neither is visible in the code — both compile, render, and look
+like a design choice until you switch pages.
 
-gsettings --schemadir $BMS set $APPS whitelist "['article2pod-gui*']"
-gsettings --schemadir $BMS set $APPS opacity 255
-gsettings --schemadir $BMS set $APPS corner-radius 8
-```
+**Dead end 1 — compositor blur via Blur My Shell.** Whitelisting the app in BMS
+supplies a real blur and renders the window stale: pages leave their content
+behind when switching, the window reads opaque until a hover event damages a
+region and repaints it, then after a few seconds it resets and works. Three BMS
+mechanisms were tried and none fixed it — `dynamic-opacity false`,
+`hacks-level 2`, and `static-blur true` (which additionally squares off the
+rounded corners, because BMS only rounds them on the non-static path). This is
+upstream [aunetx/blur-my-shell#577](https://github.com/aunetx/blur-my-shell/issues/577):
+application blur on XWayland windows, open, reported against Brave, VSCode and
+Warp with the same signature. The app is pinned to XWayland (see below), so it
+lands squarely in that bug. **If BMS is configured for this window, turn it
+off** — `whitelist` back to `[]`.
 
-`--schemadir` is required: the schema ships inside the extension's own
-directory, so a bare `gsettings` call reports "No such schema". The wildcard
-covers every name the binary takes — `cargo run` builds `article2pod-gui`,
-`dx serve` builds `article2pod-gui-<hash>` with a hash that changes between
-builds. `opacity 255` leaves Blur My Shell contributing blur and nothing else;
-it is one global key shared by every whitelisted app, and at its default 176 it
-multiplies with the app's own alpha and lands every glyph near 41%.
-`corner-radius 8` matches the window's radius, which otherwise shows as a
-bright sliver at each corner. All three apply live — the extension watches
-its own keys, which matters under Wayland where GNOME Shell cannot be restarted
-without ending the session.
+**Dead end 2 — the app's own translucency, which was the real cause.** With BMS
+fully reverted the ghosting remained, which is what ruled the compositor out
+entirely. A translucent `--bg` on a transparent window ghosts on its own: an
+opaque region repaints by overwriting, so painting the damaged rectangle fully
+determines the result, while a translucent region repaints by blending against
+what is underneath — and WebKitGTK's damage path here blends over the previous
+frame rather than over a cleared buffer, so the outgoing page accumulates under
+the incoming one. Bisected on the opacity itself: clean at 100%, ghosting at
+88%. Promoting `.content` to its own compositing layer with
+`transform: translateZ(0)` — the standard WebKit repaint workaround, which
+gives the region its own backing store — did not fix it either.
 
-With nothing supplying a blur the result is desktop windows read through the
-frame rather than a wash, so on such a machine the switch is worth turning off:
-**Settings → Appearance → Let the desktop show through**.
+Dioxus is not involved in that bug and no Dioxus-level change addresses it. The
+vdom diff, the DOM mutations and the layout pass are all correct by the time it
+happens; the failure is in WebKit's paint/damage stage, two layers below.
+
+The frosted look people credit to Warp and Ptyxis is not blur either —
+`OverrideOpacity: 90` in Warp's `user_preferences.json`, a per-profile
+`opacity` in Ptyxis — it is translucency over a wallpaper that is itself an
+out-of-focus photograph. Neither app is doing anything this one could not do,
+and both would ghost the same way on this stack.
+
+Real client-side blur does exist now: `ext-background-effect-v1`, added in
+Mutter 51. Three things block it here — this machine runs GNOME Shell 50.1,
+wry's WebKitGTK backend is GTK3 while the protocol landed in GTK 4.23.3, and
+the XWayland pin would have to go first. Any retry should start by confirming
+the ghosting is gone on that stack, not by re-adding the opacity control.
 
 **On Wayland the app forces `GDK_BACKEND=x11`.** WebKitGTK's Wayland backend
 never completes its IPC handshake here, and the failure is silent: the window

@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 
 use crate::config::{save_config, Config};
 use crate::ui::app::AppState;
-use crate::ui::components::{Card, Select, Toggle};
+use crate::ui::components::{Card, Select};
 
 /// `ZE_AFFINITY_MASK` values. Empty means "do not set it", leaving the choice
 /// to the Python side's own device detection.
@@ -99,22 +99,6 @@ pub fn SettingsPage(state: AppState) -> Element {
                             },
                         }
                     }
-                }
-            }
-
-            Card { title: "Appearance",
-                div { class: "card-row",
-                    span { class: "card-label", "Let the desktop show through" }
-                    Toggle {
-                        value: cfg.appearance.translucent,
-                        ontoggle: move |v: bool| {
-                            save_config(&mut state.config, |c| c.appearance.translucent = v);
-                        },
-                    }
-                }
-                div { class: "card-label-hint",
-                    "Needs a compositor blur behind it — see the README. Without one \
-                     the desktop reads through the frame as it is."
                 }
             }
 

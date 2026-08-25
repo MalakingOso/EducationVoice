@@ -25,8 +25,10 @@ const READABLE: [&str; 3] = ["pdf", "txt", "md"];
 
 /// What a source turned out to be.
 ///
-/// The CLI takes all three, and only one of them is a file — which is why the
-/// URL field survives the redesign: neither a URL nor stdin can be dropped.
+/// The CLI takes all three. Only the first two are reachable from this page —
+/// a file by drop or Browse, a URL by dragging a link out of a browser. Stdin
+/// stays in the enum because `article2pod.py -` still accepts it and
+/// `accept_source` is the gate for every caller, not only this page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     Url(String),
@@ -37,8 +39,8 @@ pub enum Source {
 
 /// Classify a source, or say why it cannot be used.
 ///
-/// Drop, Browse and the URL field all come through here, so the three cannot
-/// drift apart on what counts as usable. Refusing here is the whole point:
+/// Drop and Browse both come through here, so the two cannot drift apart on
+/// what counts as usable. Refusing here is the whole point:
 /// a folder handed to Python fails minutes later, after the ingest stage has
 /// already started and the message has scrolled past.
 pub fn accept_source(raw: &str) -> Result<Source, String> {
@@ -93,18 +95,29 @@ pub fn accept_source(raw: &str) -> Result<Source, String> {
     Ok(Source::File(path))
 }
 
+/// How a chosen source shows in the zone: a short label for the chip, and the
+/// full thing under it.
+///
+/// A link gets the same treatment a file does. Without it a dragged-in link
+/// would set the source and change nothing on screen, which reads as the drop
+/// having been refused.
+fn chip_for(raw: &str) -> Option<(String, String)> {
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.starts_with("http://") || raw.starts_with("https://") {
+        return Some((crate::ui::components::truncate_chars(raw, 52), raw.to_string()));
+    }
+    let path = PathBuf::from(raw);
+    Some((name_of(&path), path.display().to_string()))
+}
+
 /// The last component of a path, for a message a reader can match to what
 /// they dropped. Falls back to the whole path when there is no last component.
 fn name_of(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
-}
-
-/// Whether a raw source string is a local file rather than a URL or stdin.
-/// Decides which half of the drop zone is showing on mount.
-fn looks_like_a_file(raw: &str) -> bool {
-    matches!(accept_source(raw), Ok(Source::File(_)))
 }
 
 #[component]
@@ -114,13 +127,6 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
     let running = state.run.read().is_running();
     let source = state.source.read().clone();
 
-    // A file chosen by drop or Browse, which replaces the zone's prompt with a
-    // chip. Seeded from the source so navigating away and back does not turn a
-    // chosen PDF back into a raw path in the URL field.
-    let mut picked = use_signal(|| {
-        let raw = state.source.peek().clone();
-        looks_like_a_file(&raw).then(|| PathBuf::from(raw.trim()))
-    });
     let mut hovering = use_signal(|| false);
     let mut refusal = use_signal(|| None::<String>);
 
@@ -130,16 +136,17 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
         Ok(Source::File(p)) => {
             refusal.set(None);
             state.source.set(p.to_string_lossy().into_owned());
-            picked.set(Some(p));
         }
         Ok(_) => {}
-        Err(why) => {
-            picked.set(None);
-            refusal.set(Some(why));
-        }
+        Err(why) => refusal.set(Some(why)),
     };
 
-    let chosen = picked.read().clone();
+    // Derived from the source rather than tracked alongside it. The zone used
+    // to need its own signal to tell a typed path from a typed URL in one
+    // shared field; with the field gone, `state.source` is set only by drop and
+    // Browse and is the single truth — including across a navigation away and
+    // back, which the separate signal had to be seeded for.
+    let chosen = chip_for(source.trim());
     let can_run = !running && !source.trim().is_empty();
 
     rsx! {
@@ -173,29 +180,27 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
                     let dropped = text.lines().find(|l| l.starts_with("http")).unwrap_or("");
                     if !dropped.is_empty() {
                         refusal.set(None);
-                        picked.set(None);
                         state.source.set(dropped.to_string());
                     }
                 },
 
-                if let Some(path) = chosen.clone() {
+                if let Some((label, detail)) = chosen.clone() {
                     div { class: "dropzone-chosen",
                         div { class: "tag-chip",
-                            span { "{name_of(&path)}" }
+                            span { "{label}" }
                             button {
                                 class: "tag-remove",
                                 onclick: move |_| {
-                                    picked.set(None);
                                     refusal.set(None);
                                     state.source.set(String::new());
                                 },
                                 "\u{2715}"
                             }
                         }
-                        div { class: "dropzone-path", "{path.display()}" }
+                        div { class: "dropzone-path", "{detail}" }
                     }
                 } else {
-                    div { class: "dropzone-hint", "Drop a PDF or text file here" }
+                    div { class: "dropzone-hint", "Drop a PDF, a text file or a link here" }
                     div { class: "dropzone-browse",
                         span { class: "dropzone-or", "or" }
                         // dioxus-desktop intercepts a click on a file input and
@@ -214,17 +219,6 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
                                 },
                             }
                         }
-                    }
-
-                    div { class: "dropzone-rule", span { "or paste a URL" } }
-                    input {
-                        class: "input dropzone-url",
-                        placeholder: "https://\u{2026}, or - to read stdin",
-                        value: "{source}",
-                        oninput: move |e: Event<FormData>| {
-                            refusal.set(None);
-                            state.source.set(e.value().to_string());
-                        },
                     }
                 }
             }
@@ -299,8 +293,9 @@ fn start_run(
     let cfg = state.config.peek().clone();
     let raw = state.source.peek().trim().to_string();
 
-    // The typed field is not validated per keystroke — that would refuse
-    // "htt" — so this is where a pasted folder or a .docx is caught.
+    // Drop and Browse both validate on the way in, so by here this is
+    // belt-and-braces — and it is still the only gate a dragged-in link passes
+    // through, since that path has no dialog to filter it.
     let source = match accept_source(&raw) {
         Ok(Source::Url(u)) => u,
         Ok(Source::Stdin) => "-".to_string(),

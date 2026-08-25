@@ -107,16 +107,13 @@ pub fn App() -> Element {
     });
 
     let page = *state.page.read();
-    // Read here rather than in the attribute so the toggle in Settings is a
-    // dependency of this scope and the window repaints the moment it flips.
-    let translucent = state.config.read().appearance.translucent;
     let mut close_armed = use_signal(|| false);
 
     rsx! {
         head {
             link { rel: "stylesheet", href: asset!("assets/styles.css") }
         }
-        div { class: if translucent { "app-container translucent" } else { "app-container" },
+        div { class: "app-container",
             div { class: "app-body",
                 div { class: "left-column",
                     div { class: "corner-badge",
