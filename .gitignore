@@ -57,3 +57,6 @@ _ul
 *.pth
 *.safetensors
 .cache/
+
+# Rust build output for the GUI crate.
+gui/target/

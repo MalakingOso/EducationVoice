@@ -1,0 +1,1880 @@
+/* Beamer — Deploy Purple Design System */
+
+/* ===== Font Loading ===== */
+@font-face {
+  font-family: "DM Mono";
+  src: url("fonts/DMMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DM Mono";
+  src: url("fonts/DMMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Recursive";
+  src: url("fonts/Recursive-Variable.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ===== Tokens ===== */
+:root {
+  /* Backgrounds — warm, solid */
+  --bg:          #C7BCA7;   /* Auxin's clay ground, replacing #f5f5f7 */
+  --bg-surface:  #FEFCF8;   /* Warm near-white. Never pure white on a warm ground. */
+  --bg-hover:    #F4EFE4;
+  --bg-active:   #EBE4D5;
+  --bg-recessed: #EFE9DC;
+
+  /* Borders — accent-tinted, structural, 2px. Alpha lifted from Beamer's
+     12/25 because those values vanish against clay. */
+  --border:        rgba(2, 140, 32, 0.14);
+  --border-strong: rgba(2, 140, 32, 0.28);
+
+  /* Text — Beamer's 4-level ink hierarchy, warmed for the clay ground */
+  --fg:           #191710;
+  --fg-secondary: #6B6352;
+  --fg-muted:     #938A76;
+  --fg-faint:     #B4AB96;
+
+  /* Accent — anything configured */
+  --accent:        #028C20;
+  --accent-hover:  #03A527;
+  --accent-ink:    #FAFEFB;   /* text ON accent fills — never white-on-neon */
+  --accent-subtle: rgba(2, 140, 32, 0.10);
+  --accent-wash:   rgba(2, 140, 32, 0.05);
+
+  /* Status */
+  --danger:        #A8291B;
+  --danger-subtle: rgba(168, 41, 27, 0.08);
+  --warn:          #A2560B;   /* tokenized; Beamer hardcodes #CA8A04 */
+  --success:       var(--accent);
+
+  /* Instrument — the run strip, and nowhere else */
+  --inst:      #0E1109;
+  --inst-line: rgba(26, 252, 68, 0.20);
+  --inst-ink:  #E5EEE3;
+  --inst-mute: #8C9A87;
+  --phos:      #1AFC44;
+
+  /* Radii — Beamer, unchanged */
+  --radius: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Shadows — hard offset, zero blur, now accent-tinted green */
+  --shadow-card: 2px 4px 0 0 rgba(2, 140, 32, 0.14);
+  --shadow-cta:  2px 4px 0 0 #4a4436, 0 0 0 1px var(--accent);
+  --shadow-modal: 4px 8px 0 0 rgba(2, 140, 32, 0.15), 0 0 0 2px var(--border);
+
+  /* Motion — Beamer, unchanged */
+  --duration-fast: 150ms;
+  --duration: 200ms;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ===== Reset ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(2, 140, 32, 0.16);
+}
+
+/* ===== Body ===== */
+html, body, #main {
+  background: transparent;
+}
+
+body {
+  font-family: "Recursive", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-variation-settings: "MONO" 0, "CASL" 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===== Title Bar ===== */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 2px solid var(--border);
+  background: var(--bg-surface);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar-controls {
+  display: flex;
+  gap: 0;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  transition: background var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+}
+
+.titlebar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.titlebar-btn.close:hover {
+  background: var(--danger);
+  color: var(--bg-surface);
+}
+
+/* ===== Layout Shell ===== */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+}
+
+.app-body {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== Left Column (Badge + Sidebar) ===== */
+.left-column {
+  display: flex;
+  flex-direction: column;
+  width: 56px;
+  min-width: 56px;
+  border-right: 2px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.corner-badge {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.corner-badge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 2px;
+  bottom: 2px;
+  background: var(--bg);
+  z-index: 0;
+}
+
+.corner-badge::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 2px;
+  height: 2px;
+  background: var(--border);
+}
+
+.corner-badge-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== Right Column (Titlebar + Content) ===== */
+.right-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ===== Sidebar ===== */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  background: var(--bg-surface);
+}
+
+.sidebar-top {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding-top: 4px;
+}
+
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 4px;
+}
+
+.sidebar-icon {
+  height: 40px;
+  margin: 2px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  position: relative;
+  transition: color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+
+.sidebar-icon:hover {
+  background: var(--bg-hover);
+  color: var(--fg-secondary);
+}
+
+.sidebar-icon.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.sidebar-icon.active::before {
+  content: "";
+  position: absolute;
+  left: -6px; /* cancel the inset margin so the bar hugs the column edge */
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 1px 1px 0;
+}
+
+.sidebar-item {
+  height: 40px;
+  margin: 2px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  position: relative;
+  transition: color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+
+.sidebar-item:hover {
+  background: var(--bg-hover);
+  color: var(--fg-secondary);
+}
+
+.sidebar-item.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  left: -6px; /* cancel the inset margin so the bar hugs the column edge */
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 1px 1px 0;
+}
+
+/* Pushes the items below it to the foot of the column. */
+.sidebar-spacer {
+  flex: 1;
+}
+
+/* ===== Content Area ===== */
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ===== Home Header ===== */
+.home-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-header-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+}
+
+.home-header-title {
+  font-family: "DM Mono", monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+/* ===== Scrollbar (hidden until scrolling) ===== */
+.content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0);
+  border-radius: 3px;
+  transition: background 0.3s;
+}
+
+.content:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.10);
+}
+
+.content:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ===== Card ===== */
+.card {
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+  transition: box-shadow var(--duration-fast) var(--ease);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-card);
+}
+
+.card-title {
+  font-family: "DM Mono", monospace;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.025em;
+  margin-bottom: 12px;
+}
+
+.card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  gap: 12px;
+}
+
+.card-row + .card-row {
+  margin-top: 8px;
+}
+
+.card-label {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  min-width: 80px;
+}
+
+.card-label-hint {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* ===== Select ===== */
+.select {
+  appearance: none;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 28px 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  cursor: pointer;
+  min-width: 180px;
+  font-family: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23938A76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.select:hover {
+  border-color: var(--border-strong);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ===== Input ===== */
+.input {
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--fg);
+  font-family: inherit;
+  min-width: 120px;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.input:hover {
+  border-color: var(--border-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input::placeholder {
+  color: var(--fg-faint);
+}
+
+.input-mono {
+  font-family: "DM Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Masked Input ===== */
+.masked-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.masked-container .input {
+  flex: 1;
+}
+
+/* ===== Toggle ===== */
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease), border-color var(--duration-fast) var(--ease);
+}
+
+.toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--fg-muted);
+  transition: transform var(--duration-fast) var(--ease), background-color var(--duration-fast) var(--ease);
+}
+
+.toggle.active .toggle-knob {
+  transform: translateX(16px);
+  background: var(--accent-ink);
+}
+
+/* ===== Radio ===== */
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-secondary);
+}
+
+.radio-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.radio-dot.selected {
+  border-color: var(--accent);
+}
+
+.radio-dot.selected::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* ===== Tag Chips ===== */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-remove {
+  cursor: pointer;
+  color: var(--fg-faint);
+  font-size: 10px;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  transition: color var(--duration-fast) var(--ease);
+}
+
+.tag-remove:hover {
+  color: var(--danger);
+}
+
+/* ===== Buttons ===== */
+.btn {
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--fg-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--duration-fast) var(--ease), border-color var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.btn:active {
+  background: var(--bg-active);
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-cta);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-primary:active {
+  box-shadow: none;
+  transform: translate(1px, 2px);
+}
+
+.btn-small {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* ===== Footer ===== */
+.footer {
+  padding: 12px 16px;
+  border-top: 2px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+
+/* ===== Debug ===== */
+.debug-text {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Hotkey Display ===== */
+.hotkey-display {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-secondary);
+  background: var(--bg-recessed);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Hotkey Picker ===== */
+.hotkey-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.hotkey-mods {
+  display: flex;
+  gap: 6px;
+}
+
+.mod-pill {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
+}
+
+.mod-pill:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.mod-pill.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--fg);
+}
+
+.card-row-top {
+  align-items: flex-start;
+}
+
+/* ===== Injection Card ===== */
+.injection-backend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Disclosure row that reveals the fallback-chain list below it. */
+.injection-fallbacks-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.injection-fallbacks-toggle:hover {
+  color: var(--fg);
+}
+
+.injection-fallbacks-chevron {
+  width: 12px;
+  color: var(--fg-muted);
+}
+
+/* Fallback-chain list: wraps instead of overflowing the card.
+   min-width: 0 lets flex children shrink below their content width so long
+   backend names trigger wrapping rather than spilling past the border. */
+.injection-fallbacks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
+  padding-left: 18px;
+}
+
+.injection-fallback-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+.injection-backend-controls {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.status-dot.ok {
+  background: var(--success);
+}
+
+.status-dot.err {
+  background: var(--danger);
+}
+
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.btn-icon:hover {
+  /* Beamer names --bg-elevated here, but never defines it, so the hover was
+     a no-op. --bg-hover is the token that actually carries this role. */
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.btn-icon.remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ===== Status Dot ===== */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-ready {
+  background: var(--success);
+}
+
+.status-recording {
+  background: var(--danger);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-processing {
+  background: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===== Quick Settings ===== */
+.quick-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  gap: 12px;
+}
+
+.quick-settings-row + .quick-settings-row {
+  margin-top: 8px;
+}
+
+/* ===== History ===== */
+.history-group {
+  margin-bottom: 8px;
+}
+
+.history-date-header {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  padding: 8px 0 4px;
+}
+
+.history-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.history-entry:hover {
+  background: var(--bg-hover);
+}
+
+.history-entry .copy-btn {
+  opacity: 0;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  margin-left: auto;
+  background: none;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
+}
+
+.history-entry:hover .copy-btn {
+  opacity: 1;
+}
+
+.history-entry .copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+
+.history-entry .copy-btn.copied {
+  opacity: 1;
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(2, 140, 32, 0.06);
+}
+
+.copy-icon.check {
+  color: var(--success);
+}
+
+.entry-time {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-text {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* ===== Empty State ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 32px;
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+.empty-state-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+  opacity: 0.4;
+}
+
+.empty-state-text {
+  font-family: "DM Mono", monospace;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.empty-state-hint {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* ===== Status Log ===== */
+.status-log {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  background: var(--bg-recessed);
+}
+
+.status-log::-webkit-scrollbar {
+  width: 4px;
+}
+
+.status-log::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.status-log::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.10);
+  border-radius: 2px;
+}
+
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 4px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-time {
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+
+.log-level {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.log-level-info {
+  color: var(--fg-muted);
+}
+
+.log-level-warn {
+  color: var(--warn);
+}
+
+.log-level-error {
+  color: var(--danger);
+}
+
+.log-msg {
+  color: var(--fg-secondary);
+  word-break: break-word;
+}
+
+.log-empty {
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding: 8px;
+  text-align: center;
+}
+
+/* ===== Vocabulary Page ===== */
+.vocab-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.vocab-title {
+  font-family: "DM Mono", monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+.vocab-count {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.vocab-description {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  margin-top: -8px;
+}
+
+.vocab-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vocab-add-input {
+  flex: 1;
+}
+
+.vocab-filter {
+  width: 100%;
+}
+
+.vocab-term-card {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  min-height: 44px;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+}
+
+.vocab-term-card + .vocab-term-card {
+  margin-top: -12px;
+}
+
+.vocab-term-card:hover {
+  background: var(--bg-hover);
+  box-shadow: 2px 4px 0 0 rgba(2, 140, 32, 0.08);
+}
+
+.vocab-term-card.editing {
+  background: var(--bg-hover);
+  gap: 8px;
+  padding: 6px 16px;
+}
+
+.vocab-row-text {
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+  color: var(--fg);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.vocab-row-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.vocab-term-card:hover .vocab-row-actions {
+  opacity: 1;
+}
+
+.vocab-action-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: color var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
+}
+
+.vocab-action-btn:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.vocab-action-btn.danger:hover {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.vocab-edit-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===== Focus & Accessibility ===== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Notes board ──────────────────────────────────────────────────────────
+   Deploy Purple surfaces, with the note's own colour carried as a left stripe
+   rather than as the card's background. A board of six pastel blocks would
+   fight the rest of the app; a stripe keeps the colour legible as an index
+   while the card stays a card. */
+
+.notes-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.notes-title {
+  font-family: "DM Mono", monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.notes-count {
+  font-size: 12px;
+  color: var(--fg-secondary);
+}
+
+.notes-description {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+}
+
+.notes-search {
+  width: 100%;
+}
+
+.notes-archived-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notes-archived-label {
+  font-size: 13px;
+  color: var(--fg-secondary);
+}
+
+.note-card {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 0;
+  /* Same reason as `.task-group`: bounded scrolling column plus
+     `overflow: hidden` means a card would otherwise be squashed and clip its
+     own body rather than letting `.content` scroll. */
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+}
+
+.note-card:hover {
+  background: var(--bg-hover);
+  box-shadow: 4px 6px 0 0 rgba(2, 140, 32, 0.16);
+}
+
+.note-card.archived {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.note-card.archived:hover {
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.note-stripe {
+  flex: 0 0 6px;
+  align-self: stretch;
+}
+
+.note-stripe-purple { background: #8921E4; }
+.note-stripe-violet { background: #6B6BE4; }
+.note-stripe-amber  { background: #E4A421; }
+.note-stripe-teal   { background: #21C9B0; }
+.note-stripe-rose   { background: #E4216B; }
+.note-stripe-slate  { background: #8A93A0; }
+
+.note-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.note-card-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.note-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-secondary);
+}
+
+/* A count, not a thumbnail. Rendering the images here would need the board to
+   run its own asset handler for a strip nobody reads at card size. */
+.note-card-clips {
+  font-family: inherit;
+}
+
+.note-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 12px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.note-card:hover .note-card-actions,
+.note-card.archived .note-card-actions {
+  opacity: 1;
+}
+
+.note-action-btn {
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+.note-action-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+/* The second press of the two-step delete. Red only once it is armed: a
+   permanently-red Delete on every archived card would read as a warning about
+   the card rather than about the click. */
+.note-action-danger,
+.note-action-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The one place a note is made without speaking. Sized to the header's
+   baseline rather than made a primary CTA: dictation is the main gesture and
+   this must not out-shout it. */
+.notes-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--fg-secondary);
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
+}
+
+.notes-new-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+/* ── Tasks page ───────────────────────────────────────────────────────────
+   Grouped under the note that produced each task, so the same stripe that
+   indexes a card on the notes board indexes a group heading here. Rows are
+   flat — no card per task — because the group is the unit worth boxing. */
+
+.task-group {
+  display: flex;
+  flex-direction: column;
+  /* `.content` is a bounded flex column, so its children shrink by default —
+     and `overflow: hidden` below cancels the automatic `min-height: auto` that
+     would otherwise stop a box shrinking past its own rows. Without this the
+     groups squash instead of the page scrolling, and the rows are clipped
+     mid-sentence. Boxes keep their height; `.content` does the scrolling. */
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.task-group-header {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 34px;
+  background: var(--bg-recessed);
+  border-bottom: 2px solid var(--border);
+}
+
+.task-group-header.openable {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.task-group-header.openable:hover {
+  background: var(--accent-subtle);
+}
+
+.task-group-title {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  /* The stripe supplies the left inset via the header's gap; nothing supplies a
+     right one, so without this the ellipsis sits on the border. */
+  padding: 6px 12px 6px 0;
+  overflow: hidden;
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says why a heading offers no click, rather than leaving a dead gesture. */
+.task-group-badge {
+  align-self: center;
+  padding-right: 12px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+/* Adjacent-sibling rather than `border-top` on every row: the header already
+   carries a bottom border, and `:first-of-type` does not exclude the first row
+   here — the header is itself a div, so it takes that slot and the first row
+   would draw a second 2px line straight under it. */
+.task-row + .task-row {
+  border-top: 2px solid var(--border);
+}
+
+/* De-emphasised, not hidden: a ticked task is still the note's record of what
+   was committed to, and it sorts below the outstanding ones anyway. */
+.task-row.done {
+  opacity: 0.55;
+}
+
+.task-check {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--bg-surface);
+  background: var(--bg-surface);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+.task-check:hover {
+  border-color: var(--accent);
+}
+
+.task-check.checked {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.task-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.task-row.done .task-text {
+  text-decoration: line-through;
+}
+
+/* The evidence span is what makes a wrong extraction obvious at a glance, so
+   it is present on every row — muted and one line, ellipsized with the full
+   span on hover. */
+.task-evidence {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The dated half of a task row. `Add to calendar` sits beside the chip rather
+   than in a menu: it is one click, per task, and nothing reaches a calendar
+   without it. */
+.task-due-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.task-due {
+  padding: 1px 7px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-secondary);
+  background: var(--accent-subtle);
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.task-due.overdue {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+/* The phrase the model saw and would not turn into a date. Quiet and italic:
+   it is a quotation from the note, not a value. */
+.task-due.unresolved {
+  background: transparent;
+  border: 1px dashed var(--border);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.task-due-input {
+  padding: 1px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.task-due-btn {
+  padding: 1px 7px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+.task-row:hover .task-due-btn { opacity: 1; }
+
+.task-due-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+/* ── Local AI card ────────────────────────────────────────────────────────
+   The per-model state list is the only user-facing surface the residency
+   policy has: without it, "loaded" vs "sleeping" vs "unloaded" is invisible. */
+
+.llm-status {
+  font-size: 12px;
+}
+
+.llm-status.ok { color: var(--fg-secondary); }
+.llm-status.bad { color: var(--danger); }
+
+.llm-models {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-recessed);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.llm-model-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+}
+
+.llm-model-id { color: var(--fg); }
+.llm-model-state { color: var(--fg-secondary); }
+
+.llm-note,
+.llm-credit {
+  font-size: 12px;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+}
+
+.llm-credit {
+  padding-top: 4px;
+  border-top: 2px solid var(--border);
+}
+
+/* ── Run strip ────────────────────────────────────────────────────────────
+   The instrument surface, and the only dark one in the app. Phosphor green
+   is legible here and nowhere else, so `--phos` is scoped to this block. */
+
+.run-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  background: var(--inst);
+  border-top: 2px solid var(--inst-line);
+}
+
+.run-strip.hidden {
+  display: none;
+}
+
+/* Fixed width so the bar holds still as the stage name changes length. */
+.run-strip-stage {
+  flex-shrink: 0;
+  min-width: 92px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--inst-mute);
+}
+
+.run-strip-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--inst-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-strip-elapsed,
+.run-strip-count,
+.run-strip-pct {
+  flex-shrink: 0;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--phos);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-strip .progress-track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+}
+
+.run-strip .progress-fill {
+  height: 100%;
+  background: var(--phos);
+  transition: width var(--duration) var(--ease);
+}
+
+.run-strip-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--inst-mute);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease);
+}
+
+.run-strip-cancel:hover {
+  color: var(--phos);
+}
+
+/* ── Stage dots ───────────────────────────────────────────────────────────
+   Running and done share the accent hue — `--success` resolves to it — so the
+   two read apart by motion rather than by colour. */
+
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+.stage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.stage-dot.pending {
+  background: var(--fg-faint);
+}
+
+.stage-dot.running {
+  background: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.stage-dot.done {
+  background: var(--success);
+}
+
+.stage-dot.failed {
+  background: var(--danger);
+}
+
+/* ── Resize handles ───────────────────────────────────────────────────────
+   The window is undecorated, so the OS edges are gone and these stand in for
+   them. Above the titlebar so a drag near the top resizes instead of moving. */
+
+.rz {
+  position: fixed;
+  z-index: 100;
+  background: transparent;
+}
+
+.rz.n { top: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.rz.s { bottom: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.rz.e { top: 0; bottom: 0; right: 0; width: 6px; cursor: ew-resize; }
+.rz.w { top: 0; bottom: 0; left: 0; width: 6px; cursor: ew-resize; }
+
+.rz.nw, .rz.ne, .rz.sw, .rz.se {
+  width: 12px;
+  height: 12px;
+  z-index: 101;
+}
+
+.rz.nw { top: 0; left: 0; cursor: nwse-resize; }
+.rz.se { bottom: 0; right: 0; cursor: nwse-resize; }
+.rz.ne { top: 0; right: 0; cursor: nesw-resize; }
+.rz.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+/* ── Script editor ────────────────────────────────────────────────────────
+   The draft is prose, so it keeps the body face; only the counts are mono. */
+
+.script-editor {
+  width: 100%;
+  min-height: 320px;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.script-editor:hover {
+  border-color: var(--border-strong);
+}
+
+.script-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.script-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.script-error {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border: 2px solid var(--danger);
+  border-radius: var(--radius);
+}
+
+/* ── Library ──────────────────────────────────────────────────────────────
+   Row actions stay hidden until the row is hovered, as elsewhere. */
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  min-height: 44px;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+}
+
+.library-row + .library-row {
+  margin-top: 8px;
+}
+
+.library-row:hover {
+  background: var(--bg-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.library-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-row-meta {
+  flex-shrink: 0;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.library-row:hover .library-row-actions {
+  opacity: 1;
+}

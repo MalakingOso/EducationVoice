@@ -1,0 +1,34 @@
+[package]
+name = "article2pod-gui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "article2pod-gui"
+path = "src/main.rs"
+
+# Proves the event stream and the cancel path without a window. Build order
+# step 4 exists so the process plumbing is known-good before any UI sits on
+# top of it; this binary is what makes that step runnable.
+[[bin]]
+name = "run_smoke"
+path = "src/bin/run_smoke.rs"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["desktop"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
