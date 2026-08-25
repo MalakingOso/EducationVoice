@@ -1,7 +1,18 @@
+# NOTE: torch/torchvision/torchaudio are deliberately NOT listed here.
+# They must come from the Intel XPU index, installed separately BEFORE this file:
+#
+#   pip install 'torch==2.12.1+xpu' torchvision torchaudio \
+#       --index-url https://download.pytorch.org/whl/xpu
+#
+# Pin 2.12.1 — torch 2.13.0+xpu silently returns wrong results from
+# masked_select/nonzero/unique on Arc GPUs. See README "Broken torch XPU versions".
+#
+# Listing them here (even with --extra-index-url) lets pip resolve the
+# CPU-only PyPI wheel, and torch.xpu.is_available() silently returns False.
+
 # Core
 claude-agent-sdk
 vibevoice
-torch
 transformers
 huggingface_hub
 

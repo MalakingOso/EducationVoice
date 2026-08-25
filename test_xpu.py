@@ -14,6 +14,8 @@ if torch.xpu.is_available():
     print(f"Device: {t.device}")
 else:
     print("\nXPU not available. Check that:")
-    print("  1. intel-extension-for-pytorch is installed")
-    print("  2. Intel GPU drivers are up to date")
-    print("  3. You installed the correct PyTorch + IPEX versions")
+    print("  1. torch was installed from the XPU index:")
+    print("     pip install torch --index-url https://download.pytorch.org/whl/xpu")
+    print("     (the default PyPI wheel has no XPU support)")
+    print("  2. Intel GPU drivers / Level Zero runtime are installed")
+    print("  3. The GPU is enumerable: run `sycl-ls` and check `lspci`")

@@ -1,5 +1,6 @@
 """Demo: Chatterbox Multilingual TTS — Spanish news with voice cloning on Intel XPU."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -8,7 +9,11 @@ import scipy.io.wavfile as wavfile
 import numpy as np
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-VOICE_REF = r"C:\Users\berkl\Rust\Sonoro\assets\spansample.m4a"
+# Voice reference for cloning. Override with CHATTERBOX_VOICE_REF=/path/to/sample.m4a
+VOICE_REF = os.environ.get(
+    "CHATTERBOX_VOICE_REF",
+    str(Path.home() / "Programming" / "Sonoro" / "assets" / "spansample.m4a"),
+)
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
