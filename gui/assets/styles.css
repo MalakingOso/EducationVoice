@@ -98,7 +98,7 @@ html, body, #main {
 }
 
 body {
-  font-family: "Recursive", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: "Recursive", system-ui, sans-serif;
   font-variation-settings: "MONO" 0, "CASL" 0;
   color: var(--fg);
   font-size: 14px;
@@ -1877,4 +1877,19 @@ body {
 
 .library-row:hover .library-row-actions {
   opacity: 1;
+}
+
+/* Two-step arm-then-confirm, which stands in for the modal primitive this
+   design deliberately does not have. The armed state has to read as
+   destructive at a glance, or the second click is a surprise. */
+.titlebar-btn.armed,
+.btn-icon.armed {
+  background: var(--danger);
+  color: var(--bg-surface);
+}
+
+.titlebar-btn.armed:hover,
+.btn-icon.armed:hover {
+  background: var(--danger);
+  color: var(--bg-surface);
 }

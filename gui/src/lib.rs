@@ -7,7 +7,10 @@
 //! test compiles and runs a second time, overstating the suite. A library
 //! both binaries link removes that whole problem.
 
+pub mod config;
+pub mod library;
 pub mod paths;
 pub mod proto;
 pub mod roster;
 pub mod runner;
+pub mod ui;

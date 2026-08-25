@@ -81,6 +81,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "dirs",
+ "futures-util",
  "image",
  "libc",
  "serde",

@@ -2,6 +2,7 @@
 name = "article2pod-gui"
 version = "0.1.0"
 edition = "2021"
+default-run = "article2pod-gui"
 
 [[bin]]
 name = "article2pod-gui"
@@ -26,6 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
+futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]

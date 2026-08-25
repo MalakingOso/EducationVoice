@@ -1,0 +1,12 @@
+[application]
+name = "article2pod"
+out_dir = "dist"
+asset_dir = "assets"
+
+[bundle]
+identifier = "com.article2pod.gui"
+publisher = "article2pod"
+icon = ["assets/icon.png"]
+resources = ["assets/*", "assets/fonts/*"]
+category = "Utility"
+short_description = "Turn journal articles into multi-host podcasts"
