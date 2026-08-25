@@ -15,6 +15,13 @@ path = "src/main.rs"
 name = "run_smoke"
 path = "src/bin/run_smoke.rs"
 
+# Answers one question the rest of the drop path rests on: does a WebKitGTK
+# drop still carry native paths once GDK_BACKEND=x11 is forced? Kept rather
+# than deleted, because a WebKitGTK update can silently take that away.
+[[bin]]
+name = "drop_smoke"
+path = "src/bin/drop_smoke.rs"
+
 [dependencies]
 dioxus = { version = "0.7", features = ["desktop"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }

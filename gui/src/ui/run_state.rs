@@ -52,6 +52,10 @@ pub struct RunState {
     /// rather than inferred.
     pub device: Option<String>,
     pub model: Option<String>,
+    /// The article's title, as the ingest stage reported it. Carried into the
+    /// sidecar so the Library can name the row after the article rather than
+    /// after the filename it was collapsed into.
+    pub title: Option<String>,
     /// Where the script landed, which is what the gate opens.
     pub script_path: Option<PathBuf>,
     pub output_path: Option<PathBuf>,
@@ -71,6 +75,7 @@ impl Default for RunState {
             started: None,
             device: None,
             model: None,
+            title: None,
             script_path: None,
             output_path: None,
             last_error: None,
@@ -124,6 +129,14 @@ impl RunState {
             // the strip: there is no honest fraction to derive from a count of
             // messages, and the strip must not imply one.
             PyEvent::Message { .. } => {}
+
+            // Recorded, not displayed. The strip says what is happening; the
+            // title says what it is happening to, which is the Library's
+            // question rather than the strip's.
+            PyEvent::Title { text } => {
+                let text = text.trim();
+                self.title = (!text.is_empty()).then(|| text.to_string());
+            }
 
             PyEvent::Warning { text } => self.warnings.push(text.clone()),
 

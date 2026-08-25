@@ -1,4 +1,4 @@
-/* Beamer — Deploy Purple Design System */
+/* Beamer's design system, with Prussian blue in place of Deploy Purple. */
 
 /* ===== Font Loading ===== */
 @font-face {
@@ -27,55 +27,58 @@
 
 /* ===== Tokens ===== */
 :root {
-  /* Backgrounds — warm, solid */
-  --bg:          #C7BCA7;   /* Auxin's clay ground, replacing #f5f5f7 */
-  --bg-surface:  #FEFCF8;   /* Warm near-white. Never pure white on a warm ground. */
-  --bg-hover:    #F4EFE4;
-  --bg-active:   #EBE4D5;
-  --bg-recessed: #EFE9DC;
+  /* Backgrounds — solid */
+  --bg: #f5f5f7;
+  --bg-surface: #ffffff;
+  --bg-hover: #f1f3f9;
+  --bg-active: #e8ebf4;
+  --bg-recessed: #f1f3f9;
 
-  /* Borders — accent-tinted, structural, 2px. Alpha lifted from Beamer's
-     12/25 because those values vanish against clay. */
-  --border:        rgba(2, 140, 32, 0.14);
-  --border-strong: rgba(2, 140, 32, 0.28);
+  /* Chrome — the rail, the titlebar and the run strip. Split from
+     --bg-surface so translucency can reach the frame without reaching the
+     cards, which is where every word in the app is set. */
+  --bg-chrome: #ffffff;
 
-  /* Text — Beamer's 4-level ink hierarchy, warmed for the clay ground */
-  --fg:           #191710;
-  --fg-secondary: #6B6352;
-  --fg-muted:     #938A76;
-  --fg-faint:     #B4AB96;
+  /* Borders — accent-tinted, structural.
+     Beamer's alphas are 12/25, tuned for a violet that keeps its hue at low
+     opacity. Prussian blue shares a family with the blue-grey ink ramp
+     (--fg-secondary is #64708b), so at 12% over white it composites to about
+     #e3e8ec and reads as plain grey. Raised until the tint is legible as
+     accent; the accent itself is unchanged. */
+  --border: rgba(20, 73, 107, 0.22);
+  --border-strong: rgba(20, 73, 107, 0.38);
 
-  /* Accent — anything configured */
-  --accent:        #028C20;
-  --accent-hover:  #03A527;
-  --accent-ink:    #FAFEFB;   /* text ON accent fills — never white-on-neon */
-  --accent-subtle: rgba(2, 140, 32, 0.10);
-  --accent-wash:   rgba(2, 140, 32, 0.05);
+  /* Text — 4-level ink hierarchy */
+  --fg: #0f152a;
+  --fg-secondary: #64708b;
+  --fg-muted: #94a0b8;
+  --fg-faint: #b8c0d4;
+
+  /* Accent — Prussian blue. 9.57:1 on white, the closest in weight to
+     Beamer's Deploy Purple, so its tints and hard shadows keep the balance
+     they were tuned for. */
+  --accent: #14496B;
+  --accent-hover: #1B5D89;
+  --accent-subtle: rgba(20, 73, 107, 0.08);
+  --accent-wash: rgba(20, 73, 107, 0.04);
 
   /* Status */
-  --danger:        #A8291B;
-  --danger-subtle: rgba(168, 41, 27, 0.08);
-  --warn:          #A2560B;   /* tokenized; Beamer hardcodes #CA8A04 */
-  --success:       var(--accent);
+  --danger: #DC2626;
+  --danger-subtle: rgba(220, 38, 38, 0.06);
+  --success: #16A34A;
+  --warn: #CA8A04;   /* tokenized; Beamer hardcodes this once at .log-level-warn */
 
-  /* Instrument — the run strip, and nowhere else */
-  --inst:      #0E1109;
-  --inst-line: rgba(26, 252, 68, 0.20);
-  --inst-ink:  #E5EEE3;
-  --inst-mute: #8C9A87;
-  --phos:      #1AFC44;
-
-  /* Radii — Beamer, unchanged */
+  /* Radii */
   --radius: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
 
-  /* Shadows — hard offset, zero blur, now accent-tinted green */
-  --shadow-card: 2px 4px 0 0 rgba(2, 140, 32, 0.14);
-  --shadow-cta:  2px 4px 0 0 #4a4436, 0 0 0 1px var(--accent);
-  --shadow-modal: 4px 8px 0 0 rgba(2, 140, 32, 0.15), 0 0 0 2px var(--border);
+  /* Shadows — hard offset, zero blur */
+  --shadow-card: 2px 4px 0 0 rgba(20, 73, 107, 0.12);
+  --shadow-cta: 2px 4px 0 0 #4a4a4a, 0 0 0 1px #14496B;
+  --shadow-modal: 4px 8px 0 0 rgba(20, 73, 107, 0.15), 0 0 0 2px var(--border);
 
-  /* Motion — Beamer, unchanged */
+  /* Motion */
   --duration-fast: 150ms;
   --duration: 200ms;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
@@ -89,7 +92,7 @@
 }
 
 ::selection {
-  background: rgba(2, 140, 32, 0.16);
+  background: rgba(20, 73, 107, 0.16);
 }
 
 /* ===== Body ===== */
@@ -116,7 +119,7 @@ body {
   height: 32px;
   padding: 0 8px;
   border-bottom: 2px solid var(--border);
-  background: var(--bg-surface);
+  background: var(--bg-chrome);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -149,7 +152,7 @@ body {
 
 .titlebar-btn.close:hover {
   background: var(--danger);
-  color: var(--bg-surface);
+  color: white;
 }
 
 /* ===== Layout Shell ===== */
@@ -160,6 +163,18 @@ body {
   overflow: hidden;
   background: var(--bg);
   border-radius: var(--radius-lg);
+}
+
+/* Translucent mode. The compositor supplies the blur (Blur My Shell); this
+   decides what it shows through. Only surfaces with no text on them go
+   see-through — cards, inputs and buttons keep --bg-surface and stay opaque,
+   so nothing from the contrast pass is given back.
+
+   Redefining the tokens here rather than restating the rules means the four
+   chrome surfaces and the ground all follow one pair of numbers. */
+.app-container.translucent {
+  --bg:        rgba(245, 245, 247, 0.60);
+  --bg-chrome: rgba(255, 255, 255, 0.72);
 }
 
 .app-body {
@@ -177,7 +192,7 @@ body {
   width: 56px;
   min-width: 56px;
   border-right: 2px solid var(--border);
-  background: var(--bg-surface);
+  background: var(--bg-chrome);
 }
 
 .corner-badge {
@@ -233,7 +248,7 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  background: var(--bg-surface);
+  background: var(--bg-chrome);
 }
 
 .sidebar-top {
@@ -445,7 +460,7 @@ body {
   cursor: pointer;
   min-width: 180px;
   font-family: inherit;
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23938A76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2394a0b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   transition: border-color var(--duration-fast) var(--ease);
@@ -533,7 +548,7 @@ body {
 
 .toggle.active .toggle-knob {
   transform: translateX(16px);
-  background: var(--accent-ink);
+  background: white;
 }
 
 /* ===== Radio ===== */
@@ -639,7 +654,7 @@ body {
 
 .btn-primary {
   background: var(--accent);
-  color: var(--accent-ink);
+  color: white;
   border-color: var(--accent);
   box-shadow: var(--shadow-cta);
 }
@@ -717,13 +732,13 @@ body {
 
 .mod-pill:hover {
   border-color: var(--accent);
-  color: var(--fg);
+  color: var(--accent);
 }
 
 .mod-pill.active {
   border-color: var(--accent);
   background: var(--accent-subtle);
-  color: var(--fg);
+  color: var(--accent);
 }
 
 .card-row-top {
@@ -922,7 +937,7 @@ body {
   opacity: 1;
   color: var(--success);
   border-color: var(--success);
-  background: rgba(2, 140, 32, 0.06);
+  background: rgba(22, 163, 74, 0.06);
 }
 
 .copy-icon.check {
@@ -1106,7 +1121,7 @@ body {
 
 .vocab-term-card:hover {
   background: var(--bg-hover);
-  box-shadow: 2px 4px 0 0 rgba(2, 140, 32, 0.08);
+  box-shadow: 2px 4px 0 0 rgba(20, 73, 107, 0.08);
 }
 
 .vocab-term-card.editing {
@@ -1245,7 +1260,7 @@ body {
 
 .note-card:hover {
   background: var(--bg-hover);
-  box-shadow: 4px 6px 0 0 rgba(2, 140, 32, 0.16);
+  box-shadow: 4px 6px 0 0 rgba(20, 73, 107, 0.16);
 }
 
 .note-card.archived {
@@ -1329,7 +1344,7 @@ body {
 }
 
 .note-action-btn:hover {
-  color: var(--fg);
+  color: var(--accent);
   border-color: var(--border-strong);
 }
 
@@ -1479,7 +1494,7 @@ body {
 }
 
 .task-check.checked {
-  color: var(--accent-ink);
+  color: white;
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -1578,7 +1593,7 @@ body {
 .task-row:hover .task-due-btn { opacity: 1; }
 
 .task-due-btn:hover {
-  color: var(--fg);
+  color: var(--accent);
   border-color: var(--border-strong);
 }
 
@@ -1590,7 +1605,7 @@ body {
   font-size: 12px;
 }
 
-.llm-status.ok { color: var(--fg-secondary); }
+.llm-status.ok { color: var(--accent); }
 .llm-status.bad { color: var(--danger); }
 
 .llm-models {
@@ -1627,9 +1642,131 @@ body {
   border-top: 2px solid var(--border);
 }
 
+/* ── Drop zone ────────────────────────────────────────────────────────────
+   The Run page's whole upper half. A card in every respect but the title —
+   there is nothing to name when the element says what it wants. */
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 24px;
+  background: var(--bg-surface);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+/* Solid while a drag is over it: dashed reads as "waiting for something",
+   solid as "let go". */
+.dropzone-active {
+  background: var(--accent-wash);
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.dropzone-hint {
+  font-size: 14px;
+  color: var(--fg-secondary);
+}
+
+.dropzone-browse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dropzone-or {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* A rule with the label sitting in it, rather than a heading above a field. */
+.dropzone-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 11px;
+  font-family: "DM Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.dropzone-rule::before,
+.dropzone-rule::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+}
+
+.dropzone-url {
+  width: 100%;
+}
+
+.dropzone-chosen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The full path under the chip: the chip carries the basename, and two files
+   called `paper.pdf` in different folders are otherwise indistinguishable. */
+.dropzone-path {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* dioxus-desktop intercepts the click and opens a native dialog, so the input
+   itself never needs to be seen — but it must stay in the layout and remain
+   clickable, which `display: none` would end. */
+.file-input-hidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Why a source was refused, said where the source was chosen rather than in
+   the log, which is now a page away. */
+.source-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border: 2px solid var(--danger);
+  border-radius: var(--radius);
+}
+
+.run-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The one primary action, and the only thing below the fold. Sized to its
+   label rather than stretched, so it reads as a button and not a banner. */
+.run-start {
+  align-self: flex-start;
+}
+
 /* ── Run strip ────────────────────────────────────────────────────────────
-   The instrument surface, and the only dark one in the app. Phosphor green
-   is legible here and nowhere else, so `--phos` is scoped to this block. */
+   Another Beamer surface, sitting below .app-body so it stays visible while
+   the Library is browsed mid-synthesis. */
 
 .run-strip {
   display: flex;
@@ -1638,8 +1775,8 @@ body {
   height: 44px;
   flex-shrink: 0;
   padding: 0 12px;
-  background: var(--inst);
-  border-top: 2px solid var(--inst-line);
+  background: var(--bg-chrome);
+  border-top: 2px solid var(--border);
 }
 
 .run-strip.hidden {
@@ -1655,7 +1792,7 @@ body {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--inst-mute);
+  color: var(--fg-secondary);
 }
 
 .run-strip-detail {
@@ -1663,18 +1800,27 @@ body {
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
-  color: var(--inst-ink);
+  color: var(--fg);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .run-strip-elapsed,
-.run-strip-count,
 .run-strip-pct {
   flex-shrink: 0;
   font-family: "DM Mono", monospace;
   font-size: 11px;
-  color: var(--phos);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-strip-elapsed { color: var(--fg-secondary); }
+.run-strip-pct     { color: var(--fg); }
+
+.run-strip-count {
+  flex-shrink: 0;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1682,13 +1828,13 @@ body {
   flex: 1;
   height: 8px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-recessed);
   border-radius: var(--radius);
 }
 
 .run-strip .progress-fill {
   height: 100%;
-  background: var(--phos);
+  background: var(--accent);
   transition: width var(--duration) var(--ease);
 }
 
@@ -1700,7 +1846,7 @@ body {
   width: 24px;
   height: 24px;
   padding: 0;
-  color: var(--inst-mute);
+  color: var(--fg-muted);
   background: transparent;
   border: none;
   border-radius: var(--radius);
@@ -1709,12 +1855,12 @@ body {
 }
 
 .run-strip-cancel:hover {
-  color: var(--phos);
+  color: var(--danger);
 }
 
 /* ── Stage dots ───────────────────────────────────────────────────────────
-   Running and done share the accent hue — `--success` resolves to it — so the
-   two read apart by motion rather than by colour. */
+   `--success` is a distinct green again, so running and done differ by hue.
+   The pulse on `.running` stays: hue alone is not an accessible difference. */
 
 .stage-chip {
   display: inline-flex;
@@ -1748,32 +1894,6 @@ body {
 .stage-dot.failed {
   background: var(--danger);
 }
-
-/* ── Resize handles ───────────────────────────────────────────────────────
-   The window is undecorated, so the OS edges are gone and these stand in for
-   them. Above the titlebar so a drag near the top resizes instead of moving. */
-
-.rz {
-  position: fixed;
-  z-index: 100;
-  background: transparent;
-}
-
-.rz.n { top: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
-.rz.s { bottom: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
-.rz.e { top: 0; bottom: 0; right: 0; width: 6px; cursor: ew-resize; }
-.rz.w { top: 0; bottom: 0; left: 0; width: 6px; cursor: ew-resize; }
-
-.rz.nw, .rz.ne, .rz.sw, .rz.se {
-  width: 12px;
-  height: 12px;
-  z-index: 101;
-}
-
-.rz.nw { top: 0; left: 0; cursor: nwse-resize; }
-.rz.se { bottom: 0; right: 0; cursor: nwse-resize; }
-.rz.ne { top: 0; right: 0; cursor: nesw-resize; }
-.rz.sw { bottom: 0; left: 0; cursor: nesw-resize; }
 
 /* ── Script editor ────────────────────────────────────────────────────────
    The draft is prose, so it keeps the body face; only the counts are mono. */
@@ -1820,6 +1940,25 @@ body {
   background: var(--danger-subtle);
   border: 2px solid var(--danger);
   border-radius: var(--radius);
+}
+
+/* ── Library ──────────────────────────────────────────────────────────────
+   Filters the groups below it, so it sits above them rather than in a card. */
+
+.library-search {
+  width: 100%;
+  flex-shrink: 0;
+}
+
+/* The title doubles as the rename affordance, so it has to look pressable
+   without becoming a button — the row is already clickable in three places. */
+.library-row-title:hover {
+  color: var(--accent);
+}
+
+.library-rename {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── Library ──────────────────────────────────────────────────────────────

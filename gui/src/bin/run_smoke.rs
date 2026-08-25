@@ -74,8 +74,6 @@ async fn main() -> Result<()> {
         Some("script") => RunKind::Script {
             source: arg(&positional, 1, "source")?.to_string(),
             hosts: arg(&positional, 2, "hosts")?.parse()?,
-            tone: "conversational and engaging".to_string(),
-            length: None,
             script_out: PathBuf::from(arg(&positional, 3, "script-out path")?),
         },
         _ => bail!(USAGE),

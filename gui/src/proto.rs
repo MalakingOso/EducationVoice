@@ -70,6 +70,12 @@ pub enum PyEvent {
     Message {
         text: String,
     },
+    /// The article's title, emitted during ingest so it is available even on
+    /// a `--script-only` run — which is stage 1 of the gated flow, and the
+    /// point at which the Library first has a row to name.
+    Title {
+        text: String,
+    },
     Progress {
         stage: Stage,
         step: u64,
@@ -254,6 +260,20 @@ mod tests {
             Measured::from_step(9_000, Some(2_166)),
             Measured::Fraction(1.0),
             "max_steps is an upper bound the child may revise; the bar must not exceed the track"
+        );
+    }
+
+    #[test]
+    fn a_title_event_names_the_row_the_library_will_show() {
+        let got = parse_line(
+            r#"{"event":"title","text":"Reversal of Thromboprophylaxis in Bariatric Surgery"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            PyEvent::Title {
+                text: "Reversal of Thromboprophylaxis in Bariatric Surgery".to_string()
+            }
         );
     }
 

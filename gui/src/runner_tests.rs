@@ -10,8 +10,6 @@ fn script_kind() -> RunKind {
     RunKind::Script {
         source: "/home/berkley/ROTBIGS.pdf".into(),
         hosts: 2,
-        tone: "conversational and engaging".into(),
-        length: None,
         script_out: PathBuf::from("output/rotbigs.script.txt"),
     }
 }
@@ -39,27 +37,27 @@ fn the_source_leads_the_argv_because_it_is_a_positional() {
 }
 
 #[test]
-fn an_absent_length_omits_the_flag_rather_than_passing_an_empty_string() {
-    let argv = script_kind().argv();
-    assert!(
-        !argv.contains(&"--length".to_string()),
-        "the CLI's default is the article's own density; an empty --length \
-         would override that with nothing"
-    );
-}
-
-#[test]
-fn a_present_length_is_passed_through_verbatim() {
-    let argv = RunKind::Script {
-        source: "/home/berkley/ROTBIGS.pdf".into(),
-        hosts: 2,
-        tone: "conversational and engaging".into(),
-        length: Some("about 12 minutes".into()),
-        script_out: PathBuf::from("output/rotbigs.script.txt"),
+fn neither_tone_nor_length_is_ever_passed() {
+    // The GUI does not expose either, and the CLI's own defaults are the
+    // specified behaviour: --tone already defaults to "conversational and
+    // engaging", and omitting --length is what selects LENGTH_BY_DENSITY,
+    // the "let the article decide" prompt block. Passing either would only
+    // restate a default, or — for --length — silently replace that block
+    // with a duration nobody asked for.
+    for kind in [
+        script_kind(),
+        RunKind::OneShot {
+            source: "https://example.com/paper".into(),
+            hosts: 2,
+            voices: vec!["alice".into(), "carter".into()],
+            output: PathBuf::from("output/paper.wav"),
+            script_out: PathBuf::from("output/paper.script.txt"),
+        },
+    ] {
+        let argv = kind.argv();
+        assert!(!argv.contains(&"--tone".to_string()), "in {argv:?}");
+        assert!(!argv.contains(&"--length".to_string()), "in {argv:?}");
     }
-    .argv();
-    let i = argv.iter().position(|a| a == "--length").expect("flag present");
-    assert_eq!(argv[i + 1], "about 12 minutes");
 }
 
 #[test]
@@ -106,8 +104,6 @@ fn auto_continue_is_one_invocation_carrying_both_outputs() {
     let argv = RunKind::OneShot {
         source: "https://example.com/paper".into(),
         hosts: 2,
-        tone: "conversational and engaging".into(),
-        length: None,
         voices: vec!["alice".into(), "carter".into()],
         output: PathBuf::from("output/paper.wav"),
         script_out: PathBuf::from("output/paper.script.txt"),
@@ -153,7 +149,7 @@ fn every_flag_is_followed_by_its_value_and_never_by_another_flag() {
     // Catches a push_path/push_voices call that forgot its payload — the
     // failure mode is argparse consuming the next flag as the value, which
     // produces a confusing error minutes into a run rather than at spawn.
-    let takes_value = ["--hosts", "--tone", "--length", "--output", "--script-out", "--from-script"];
+    let takes_value = ["--hosts", "--output", "--script-out", "--from-script"];
     for kind in [
         script_kind(),
         RunKind::Synth {
@@ -165,8 +161,6 @@ fn every_flag_is_followed_by_its_value_and_never_by_another_flag() {
         RunKind::OneShot {
             source: "src".into(),
             hosts: 4,
-            tone: "dry".into(),
-            length: Some("short".into()),
             voices: vec!["alice".into()],
             output: "o.wav".into(),
             script_out: "s.txt".into(),

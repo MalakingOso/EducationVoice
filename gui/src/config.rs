@@ -21,6 +21,8 @@ pub struct Config {
     pub voices: VoiceSettings,
     #[serde(default)]
     pub device: DeviceSettings,
+    #[serde(default)]
+    pub appearance: AppearanceSettings,
 }
 
 /// What the next run asks of `article2pod.py`.
@@ -34,12 +36,6 @@ pub struct RunSettings {
     /// corrupt path instead of being clamped.
     #[serde(default = "default_hosts")]
     pub hosts: u8,
-    #[serde(default = "default_tone")]
-    pub tone: String,
-    /// Empty means the article decides how long the episode runs; the flag is
-    /// omitted from argv entirely rather than passed as an empty string.
-    #[serde(default)]
-    pub length: String,
     /// Skip the script-review gate and go straight to synthesis. Off by
     /// default because the review gate is the only place a bad script can be
     /// caught before it costs a full TTS pass.
@@ -65,11 +61,28 @@ pub struct DeviceSettings {
     pub gpu_mask: String,
 }
 
+/// How the window is painted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppearanceSettings {
+    /// Let the desktop show through the ground and the chrome.
+    ///
+    /// On by default. Worth a switch rather than a constant: translucency is
+    /// only half the effect, and on a machine with no compositor blur behind
+    /// it the result is raw desktop windows read through the frame rather
+    /// than a wash.
+    #[serde(default = "default_translucent")]
+    pub translucent: bool,
+}
+
 /// The host counts `article2pod.py --hosts` accepts.
 const HOST_CHOICES: [u8; 3] = [2, 3, 4];
 
 fn default_hosts() -> u8 { 2 }
-fn default_tone() -> String { "conversational and engaging".into() }
+
+/// Named rather than leaning on `bool`'s own `false`: a `config.toml` written
+/// before this key existed deserializes the missing field through this, and
+/// `#[serde(default)]` would turn the feature off on upgrade in silence.
+fn default_translucent() -> bool { true }
 
 impl Default for Config {
     fn default() -> Self {
@@ -77,6 +90,7 @@ impl Default for Config {
             run: RunSettings::default(),
             voices: VoiceSettings::default(),
             device: DeviceSettings::default(),
+            appearance: AppearanceSettings::default(),
         }
     }
 }
@@ -85,8 +99,6 @@ impl Default for RunSettings {
     fn default() -> Self {
         Self {
             hosts: default_hosts(),
-            tone: default_tone(),
-            length: String::new(),
             auto_continue: false,
         }
     }
@@ -101,6 +113,15 @@ impl Default for VoiceSettings {
 impl Default for DeviceSettings {
     fn default() -> Self {
         Self { gpu_mask: String::new() }
+    }
+}
+
+impl Default for AppearanceSettings {
+    /// Written out rather than derived. A missing `[appearance]` section is
+    /// filled from here, so a derived `false` would opt every existing
+    /// install out of the feature the moment it shipped.
+    fn default() -> Self {
+        Self { translucent: default_translucent() }
     }
 }
 
@@ -260,11 +281,13 @@ mod tests {
     fn the_documented_defaults_are_what_default_actually_produces() {
         let config = Config::default();
         assert_eq!(config.run.hosts, 2);
-        assert_eq!(config.run.tone, "conversational and engaging");
-        assert_eq!(config.run.length, "", "empty length means the article decides its own");
         assert!(!config.run.auto_continue, "the script-review gate is on until asked otherwise");
         assert!(config.voices.selected.is_empty(), "an empty list defers to the CLI's roster");
         assert_eq!(config.device.gpu_mask, "", "an empty mask leaves ZE_AFFINITY_MASK unset");
+        assert!(
+            config.appearance.translucent,
+            "the window lets the desktop through until the switch says otherwise"
+        );
     }
 
     #[test]
@@ -273,14 +296,15 @@ mod tests {
         let written = Config {
             run: RunSettings {
                 hosts: 3,
-                tone: "dry and precise".into(),
-                length: "20 minutes".into(),
                 auto_continue: true,
             },
             voices: VoiceSettings {
                 selected: vec!["alice".into(), "carter".into(), "maya".into()],
             },
             device: DeviceSettings { gpu_mask: "1".into() },
+            // The non-default value on purpose: a `true` here would round-trip
+            // identically whether it was loaded or quietly defaulted.
+            appearance: AppearanceSettings { translucent: false },
         };
         written.save_to(&path).expect("save");
 
@@ -320,17 +344,37 @@ mod tests {
         let path = temp_dir("unknown").join("config.toml");
         std::fs::write(
             &path,
-            "[run]\nhosts = 3\nfuture_field = \"whatever\"\n\n[telemetry]\nenabled = true\n",
+            // `tone` and `length` are not hypothetical: every config.toml
+            // written before they left RunSettings still carries them.
+            "[run]\nhosts = 3\ntone = \"dry\"\nlength = \"20 minutes\"\n\
+             future_field = \"whatever\"\n\n[telemetry]\nenabled = true\n",
         )
         .expect("write");
 
         let config = load_from(&path).expect("a newer build's keys must not lock this build out");
         assert_eq!(config.run.hosts, 3, "the keys this build knows still take effect");
-        assert_eq!(
-            config.run.tone,
-            default_tone(),
+        assert!(
+            !config.run.auto_continue,
             "keys the file omits fall back to their defaults"
         );
+    }
+
+    #[test]
+    fn a_config_written_before_appearance_existed_still_opens_translucent() {
+        let path = temp_dir("pre-appearance").join("config.toml");
+        // Every config.toml on disk today looks like this: no [appearance] at
+        // all. Serde fills a missing section from `Default`, so a derived one
+        // — or a bare `#[serde(default)]` on the field — turns the feature off
+        // on upgrade without a word.
+        std::fs::write(&path, "[run]\nhosts = 2\n\n[device]\ngpu_mask = \"1\"\n")
+            .expect("write");
+
+        let config = load_from(&path).expect("load");
+        assert!(
+            config.appearance.translucent,
+            "an upgrade must not silently opt the window out of translucency"
+        );
+        assert_eq!(config.device.gpu_mask, "1", "the sections the file does have still load");
     }
 
     #[test]

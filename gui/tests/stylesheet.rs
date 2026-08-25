@@ -2,8 +2,8 @@
 //!
 //! Every failure guarded here is invisible: none of them errors, warns, or
 //! fails to compile. A missing font silently falls back, an undefined class
-//! silently renders wrong, and an escaped `--phos` renders green-on-cream at
-//! 1.4:1 — technically drawn, practically unreadable.
+//! silently renders wrong, and a re-derived Auxin token looks like a design
+//! decision rather than a regression.
 
 const CSS: &str = include_str!("../assets/styles.css");
 
@@ -191,30 +191,82 @@ fn attribute_span(after: &str) -> String {
     literals
 }
 
-#[test]
-fn phosphor_appears_only_inside_the_run_strip() {
-    let mut escapes: Vec<String> = Vec::new();
+/// Auxin values, in every form this stylesheet has actually carried them.
+///
+/// The greens live here mostly as `rgba(2, 140, 32, …)` rather than as hex, so
+/// a hex-only ban would miss exactly the form that eroded last time. The warm
+/// ink ramp is included because the `:root` replacement kills all of it — any
+/// survivor is a rule that was edited to hold its own copy.
+const AUXIN: &[(&str, &str)] = &[
+    ("--phos", "the instrument phosphor token"),
+    ("--inst", "the instrument surface tokens"),
+    ("#0E1109", "the re-derived instrument ground"),
+    ("#1AFC44", "the re-derived phosphor"),
+    ("#028C20", "the re-derived chlorophyll accent"),
+    ("2, 140, 32", "the accent as an rgba triple — the form that actually spread"),
+    ("26, 252, 68", "the phosphor as an rgba triple"),
+    ("#C7BCA7", "Auxin's Loam ground"),
+    ("#FBF8F2", "Auxin's card"),
+    ("#FDFCFA", "Auxin's raised card"),
+    ("#0D6234", "Auxin's Chlorophyll"),
+    ("#70F860", "Auxin's phosphor"),
+    ("#141109", "Auxin's instrument panel"),
+    ("#A2560B", "Auxin's amber, which arrived byte-identical as --warn"),
+    ("#FAFEFB", "Auxin's seed, which arrived byte-identical as --accent-ink"),
+    ("#938A76", "the warmed --fg-muted, which also stroked the select chevron"),
+    ("#6B6352", "the warmed --fg-secondary"),
+    ("#B4AB96", "the warmed --fg-faint"),
+    ("#191710", "the warmed --fg"),
+];
 
-    for (selector, block) in rules(CSS) {
-        if !block.contains("var(--phos)") {
-            continue;
-        }
-        // A selector list is comma-separated and every branch has to qualify;
-        // one stray member is enough to paint neon on cream.
-        for part in selector.split(',') {
-            let part = part.trim();
-            if !part.starts_with(".run-strip") {
-                escapes.push(format!("{part} {{ ... var(--phos) ... }}"));
-            }
+#[test]
+fn no_auxin_palette_survives() {
+    let lower = CSS.to_lowercase();
+    let mut found: Vec<String> = Vec::new();
+
+    for (needle, what) in AUXIN {
+        if lower.contains(&needle.to_lowercase()) {
+            found.push(format!("{needle} — {what}"));
         }
     }
 
     assert!(
-        escapes.is_empty(),
-        "#1AFC44 has relative luminance 0.70 — 1.4:1 against white — so it is \
-         legible only on the dark instrument surface. These rules use it \
-         elsewhere:\n  {}",
-        escapes.join("\n  ")
+        found.is_empty(),
+        "this stylesheet is Beamer's, and these are Auxin's. The palette arrived \
+         the first time by re-derivation rather than by copy-paste, one \
+         convenient exception at a time, so the ban is on the values \
+         themselves:\n  {}",
+        found.join("\n  ")
+    );
+}
+
+#[test]
+fn translucency_reaches_the_ground_and_the_chrome_but_never_a_card() {
+    let block = rules(CSS)
+        .into_iter()
+        // `rules` folds everything at brace depth 0 into the selector, so the
+        // comment above the block comes along with it — match the tail.
+        .find(|(selector, _)| selector.trim_end().ends_with(".app-container.translucent"))
+        .map(|(_, block)| block)
+        .expect(
+            "the translucent ground is one CSS block; without it the switch in \
+             Settings toggles a class nothing styles",
+        );
+
+    for token in ["--bg:", "--bg-chrome:"] {
+        assert!(
+            block.contains(token),
+            "the translucent block must redefine {token} — it is what carries \
+             the effect to the ground and the frame"
+        );
+    }
+
+    assert!(
+        !block.contains("--bg-surface"),
+        "--bg-surface paints the cards, the inputs and the buttons, which is \
+         where every word in the app is set. Making it translucent gives back \
+         the whole contrast pass at once, and it reads as a design choice \
+         rather than as a regression."
     );
 }
 

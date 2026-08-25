@@ -182,6 +182,9 @@ pub fn log_event(log: &mut Signal<StatusLog>, event: &PyEvent) {
         PyEvent::Message { text } => {
             log_status(log, LogLevel::Info, truncate_chars(text.trim(), 400));
         }
+        PyEvent::Title { text } => {
+            log_status(log, LogLevel::Info, format!("title: {text}"))
+        }
         PyEvent::Warning { text } => log_status(log, LogLevel::Warn, text.clone()),
         PyEvent::Error { text } => log_status(log, LogLevel::Error, text.clone()),
         PyEvent::Done { output } => {

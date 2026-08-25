@@ -44,11 +44,14 @@ const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 pub enum RunKind {
     /// Stage 1 of the gated flow. Deliberately never touches voices, so it
     /// cannot fail on a voice problem after spending Claude tokens.
+    ///
+    /// Neither `--tone` nor `--length` appears in any variant. The CLI's own
+    /// defaults are the specified behaviour, so passing them would only
+    /// restate them — and omitting `--length` is what selects the
+    /// "let the article decide" prompt block rather than a duration.
     Script {
         source: String,
         hosts: u8,
-        tone: String,
-        length: Option<String>,
         script_out: PathBuf,
     },
     /// Stage 2: synthesize a script that already exists on disk, edited or not.
@@ -67,8 +70,6 @@ pub enum RunKind {
     OneShot {
         source: String,
         hosts: u8,
-        tone: String,
-        length: Option<String>,
         voices: Vec<String>,
         output: PathBuf,
         script_out: PathBuf,
@@ -92,18 +93,10 @@ impl RunKind {
             RunKind::Script {
                 source,
                 hosts,
-                tone,
-                length,
                 script_out,
             } => {
                 a.push(source.clone());
                 push_hosts(&mut a, *hosts);
-                a.push("--tone".into());
-                a.push(tone.clone());
-                if let Some(l) = length {
-                    a.push("--length".into());
-                    a.push(l.clone());
-                }
                 a.push("--script-only".into());
                 push_path(&mut a, "--script-out", script_out);
                 a.push("--progress-json".into());
@@ -123,20 +116,12 @@ impl RunKind {
             RunKind::OneShot {
                 source,
                 hosts,
-                tone,
-                length,
                 voices,
                 output,
                 script_out,
             } => {
                 a.push(source.clone());
                 push_hosts(&mut a, *hosts);
-                a.push("--tone".into());
-                a.push(tone.clone());
-                if let Some(l) = length {
-                    a.push("--length".into());
-                    a.push(l.clone());
-                }
                 push_voices(&mut a, voices);
                 push_path(&mut a, "--output", output);
                 push_path(&mut a, "--script-out", script_out);

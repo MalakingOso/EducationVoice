@@ -1,12 +1,7 @@
-//! The run strip: one dark instrument surface along the bottom of the window.
+//! The run strip: one status surface along the bottom of the window.
 //!
 //! It sits below `.app-body` rather than inside a page, so it stays visible
 //! while the Library is being browsed mid-synthesis.
-//!
-//! This is the only place `--phos` appears. `#1AFC44` has relative luminance
-//! 0.70 — 1.4:1 against white — so it is legible only against `--inst`. A
-//! stylesheet test enforces that; this module is the reason the rule is
-//! keepable.
 
 use std::time::Instant;
 

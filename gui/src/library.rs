@@ -33,10 +33,26 @@ const LEGACY_SCRIPT: &str = "script.txt";
 const LEGACY_STEM: &str = "script";
 
 /// What a run recorded about itself.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// **Every field defaults.** Two things depend on that. A sidecar written by an
+/// older build is missing whatever has been added since, and must still load
+/// rather than being moved aside as corrupt. And renaming an episode that
+/// never had a sidecar — everything made before the GUI existed — has nothing
+/// to write but a title: inventing a `started` for it would file a
+/// year-old episode under "Today", and inventing `hosts` would render
+/// "0 hosts" as though it were measured.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RunMeta {
+    /// The article's title, as the Library labels the row. From the Python
+    /// side's `title` event, or typed in by hand. Absent when neither
+    /// happened, which is what the fallback chain in [`Episode::title`] is for.
+    pub title: Option<String>,
     /// What the user gave: URL, path, or "-".
     pub source: String,
+    /// 0 means "not recorded", which is different from any host count the CLI
+    /// accepts — so the row can omit it rather than print a measurement it
+    /// does not have.
     pub hosts: u8,
     /// In speaker order. Empty means the CLI's default roster was used — the
     /// GUI omits `--voices` entirely in that case, so there is nothing to name.
@@ -45,12 +61,42 @@ pub struct RunMeta {
     pub device: Option<String>,
     /// The Claude model that wrote the script.
     pub model: Option<String>,
-    pub started: chrono::DateTime<chrono::Local>,
+    /// When the run started, which is the day the Library groups it under.
+    /// `None` for a sidecar this build wrote by hand during a rename.
+    pub started: Option<chrono::DateTime<chrono::Local>>,
     pub finished: Option<chrono::DateTime<chrono::Local>>,
     pub elapsed_secs: Option<u64>,
     /// "completed" | "cancelled" | "failed". A string rather than the runner's
     /// enum so an old sidecar written by a future version still deserializes.
     pub outcome: String,
+}
+
+impl RunMeta {
+    /// Fold in what the previous sidecar for this stem knew and this run does
+    /// not.
+    ///
+    /// A stem is written more than once: stage 1 of the gated flow records the
+    /// article's title, and stage 2 — sharing the stem, because it is the same
+    /// episode — replaces the whole sidecar when it finishes. Synthesis has no
+    /// title of its own and never will; it reads a script off disk and has no
+    /// article to ask about. Without this, the default flow fetches a title and
+    /// then discards it at the moment the episode is finally done.
+    ///
+    /// Only fields this run genuinely has nothing to say about are carried.
+    /// Everything measured — the device, the elapsed time, the outcome —
+    /// belongs to the run that just happened and overwrites freely.
+    pub fn carrying_forward(mut self, previous: Option<&RunMeta>) -> Self {
+        let Some(previous) = previous else { return self };
+        if self.title.is_none() {
+            self.title = previous.title.clone();
+        }
+        // Re-voicing from the Library hands over a script path and no source
+        // at all, so an empty one here means "unknown", not "none".
+        if self.source.trim().is_empty() {
+            self.source = previous.source.clone();
+        }
+        self
+    }
 }
 
 /// The string a [`RunOutcome`] is recorded under.
@@ -79,23 +125,116 @@ pub struct Episode {
 }
 
 impl Episode {
-    /// A human label for the row: the meta's source if known, else the stem.
+    /// A human label for the row, best first.
+    ///
+    /// The recorded title, then the source's last component, then the stem. No
+    /// step has to succeed: `fetch_title` is a network call that can fail, a
+    /// source can be stdin, and an episode made before any of this existed has
+    /// only a filename. The row is nameable by hand either way, which is what
+    /// makes the automatic part safe to be imperfect.
     pub fn title(&self) -> String {
         if let Some(meta) = &self.meta {
+            if let Some(title) = meta.title.as_deref().map(str::trim) {
+                if !title.is_empty() {
+                    return title.to_string();
+                }
+            }
             let source = meta.source.trim();
             // "-" is the CLI's stdin sentinel; it names nothing a reader could
             // recognise, so the stem is the better label.
             if !source.is_empty() && source != "-" {
-                return source.to_string();
+                return basename_of(source);
             }
         }
         self.stem.clone()
+    }
+
+    /// The day this episode is filed under, or `None` when nothing recorded it.
+    ///
+    /// Read from the sidecar rather than from file mtimes on purpose: an mtime
+    /// is when the bytes were last touched, which a copy or a restore changes.
+    /// An episode with no sidecar is honestly undated rather than filed under
+    /// whenever its file was last written.
+    pub fn day(&self) -> Option<chrono::NaiveDate> {
+        use chrono::Datelike;
+        let started = self.meta.as_ref()?.started?;
+        chrono::NaiveDate::from_ymd_opt(started.year(), started.month(), started.day())
+    }
+
+    /// Whether this row matches a search term. Case-insensitive over the
+    /// label and the source, which are the two things a reader would remember.
+    pub fn matches(&self, needle: &str) -> bool {
+        let needle = needle.trim().to_lowercase();
+        if needle.is_empty() {
+            return true;
+        }
+        if self.title().to_lowercase().contains(&needle) {
+            return true;
+        }
+        self.meta
+            .as_ref()
+            .is_some_and(|m| m.source.to_lowercase().contains(&needle))
     }
 
     /// True when there is audio on disk to play.
     pub fn is_playable(&self) -> bool {
         self.audio.is_some()
     }
+}
+
+/// The last component of a source, which is what a reader recognises.
+///
+/// Handles a URL and a path with the same rule — split on both separators and
+/// take the last non-empty piece — because a URL's path uses `/` on every
+/// platform and `Path::file_name` would keep the whole thing on Windows. A
+/// query string is dropped; a bare host with no path falls back to the host.
+fn basename_of(source: &str) -> String {
+    let head = source.split(['?', '#']).next().unwrap_or(source);
+    let stripped = head
+        .strip_prefix("https://")
+        .or_else(|| head.strip_prefix("http://"))
+        .unwrap_or(head);
+    stripped
+        .split(['/', '\\'])
+        .rev()
+        .find(|p| !p.is_empty())
+        .unwrap_or(source)
+        .to_string()
+}
+
+/// Group episodes by the day they ran, newest day first.
+///
+/// Mirrors Beamer's `grouped_by_day`, with one deliberate divergence: Beamer
+/// resolves an unparseable timestamp to *today*, which here would sweep every
+/// pre-GUI episode into today's group. Keying on `Option<NaiveDate>` files
+/// them honestly instead — `None` sorts below every `Some`, so after the
+/// reverse the undated bucket lands last without a special case.
+///
+/// Order inside a group is the order given, so the caller's newest-first sort
+/// carries through.
+pub fn group_by_day(episodes: &[Episode]) -> Vec<(String, Vec<Episode>)> {
+    let today = chrono::Local::now().date_naive();
+    let yesterday = today.pred_opt().unwrap_or(today);
+
+    let mut groups: BTreeMap<Option<chrono::NaiveDate>, Vec<Episode>> = BTreeMap::new();
+    for ep in episodes {
+        groups.entry(ep.day()).or_default().push(ep.clone());
+    }
+
+    groups
+        .into_iter()
+        .rev()
+        .map(|(day, eps)| {
+            let label = match day {
+                Some(d) if d == today => "Today".to_string(),
+                Some(d) if d == yesterday => "Yesterday".to_string(),
+                Some(d) => d.format("%B %d, %Y").to_string(),
+                // Not "Unknown": the run is not in doubt, only its date.
+                None => "No run record".to_string(),
+            };
+            (label, eps)
+        })
+        .collect()
 }
 
 /// A candidate for a slot, with the precedence that decides ties.
@@ -258,6 +397,22 @@ pub fn write_meta(path: &Path, meta: &RunMeta) -> Result<()> {
         return Err(e).with_context(|| format!("could not replace {}", path.display()));
     }
     Ok(())
+}
+
+/// Rename an episode, writing the title back to its sidecar.
+///
+/// This is what makes the automatic naming chain safe to be imperfect: any row
+/// the Python side names badly — or never named at all, because it predates
+/// the whole mechanism — can be fixed in place. An episode with no sidecar
+/// gets one holding the title and nothing else, which every other field's
+/// default is there to permit.
+pub fn rename(paths: &Paths, stem: &str, title: &str) -> Result<()> {
+    check_stem(stem)?;
+    let path = meta_path(paths, stem);
+    let mut meta = read_meta(&path).unwrap_or_default();
+    let title = title.trim();
+    meta.title = (!title.is_empty()).then(|| title.to_string());
+    write_meta(&path, &meta)
 }
 
 /// Read a sidecar. `None` when absent or unparseable.

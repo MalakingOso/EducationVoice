@@ -18,6 +18,11 @@ from bs4 import BeautifulSoup
 # stiffly for spoken dialogue.  Override per-run with --model.
 SCRIPT_MODEL = "claude-sonnet-5"
 
+# The model that answers "what is this article called?".  Deliberately the
+# cheapest one: naming a row in a library is not a reasoning problem, and this
+# call is pure overhead on every run that makes it.
+TITLE_MODEL = "claude-haiku-4-5-20251001"
+
 # ---------------------------------------------------------------------------
 # Progress protocol
 # ---------------------------------------------------------------------------
@@ -93,30 +98,162 @@ class _JsonTqdm:
 # Article ingestion
 # ---------------------------------------------------------------------------
 
-def ingest_article(source: str) -> tuple[str, bool]:
+def ingest_article(source: str) -> tuple[str, bool, str | None]:
     """Read article from URL, file path, or stdin.
 
-    Returns (text_or_path, is_pdf).  When the source is a PDF file we return
-    the *absolute path* so Claude can read it natively — this preserves
-    tables, figures, and visual layout that text extraction would lose.
+    Returns (text_or_path, is_pdf, page_title).  When the source is a PDF file
+    we return the *absolute path* so Claude can read it natively — this
+    preserves tables, figures, and visual layout that text extraction would
+    lose.
+
+    `page_title` is the HTML document's own <title>, and only a URL has one.
+    It is free — BeautifulSoup has already parsed the page — and it is the
+    first fallback when the model-written title does not come back.
     """
     if source == "-":
-        return sys.stdin.read(), False
+        return sys.stdin.read(), False, None
 
     if source.startswith("http://") or source.startswith("https://"):
         resp = requests.get(source, timeout=30, headers={"User-Agent": "article2pod/1.0"})
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         paragraphs = [p.get_text(strip=True) for p in soup.find_all("p")]
-        return "\n\n".join(p for p in paragraphs if p), False
+        page_title = clean_title(soup.title.get_text()) if soup.title else None
+        return "\n\n".join(p for p in paragraphs if p), False, page_title
 
     path = Path(source)
     if path.is_file():
         if path.suffix.lower() == ".pdf":
-            return str(path.resolve()), True
-        return path.read_text(encoding="utf-8"), False
+            return str(path.resolve()), True, None
+        return path.read_text(encoding="utf-8"), False, None
 
-    return source, False
+    return source, False, None
+
+
+# ---------------------------------------------------------------------------
+# Episode titles
+# ---------------------------------------------------------------------------
+
+# Long enough for a real journal title with a subtitle, short enough that a
+# paragraph of explanation is refused rather than shown as a row label.
+MAX_TITLE_CHARS = 250
+
+# How much of the article Haiku is shown.  A title lives in the first page;
+# sending 60kB of body text to find it would cost more than the script.
+TITLE_EXCERPT_CHARS = 4000
+
+# Turn budgets for the title call, which differ because only one path uses a
+# tool.  With the text already in the prompt the answer is a single turn.  A
+# PDF has to be Read first, and each Read costs an assistant turn plus a result
+# turn — measured against ROTBIGS.pdf, an unbounded "read the PDF" prompt spent
+# 6 and a "read only the first page" prompt spent 4.  Eight is that measurement
+# plus headroom for a title page that spills.  Overrunning is not a crash: the
+# SDK raises and fetch_title degrades to the fallback chain — which is exactly
+# what a max_turns of 2 did on every PDF before this was measured.
+TEXT_TITLE_TURNS = 2
+PDF_TITLE_TURNS = 8
+
+_SPEAKER_LINE = re.compile(r"^Speaker \d+\s*:", re.I)
+
+
+def clean_title(raw: str | None) -> str | None:
+    """Normalise a candidate title, or return None if it is not one.
+
+    Everything that reaches here is untrusted: a model asked for a title
+    sometimes answers with a sentence about the title, and an HTML <title> is
+    whatever the site's template produced.  A bad answer must be discarded
+    rather than shown, because it becomes a filename-shaped label on a row
+    that already has a perfectly good fallback.
+    """
+    if not raw:
+        return None
+
+    text = raw.strip()
+    # Models routinely wrap the answer, or restate the question first.
+    for prefix in ("title:", "Title:", "TITLE:"):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+    text = text.strip('"').strip("'").strip()
+    # Collapse the whitespace an HTML <title> carries from its indentation.
+    text = " ".join(text.split())
+
+    if not text:
+        return None
+    if len(text) > MAX_TITLE_CHARS:
+        # An answer this long is prose about the article, not its name.
+        return None
+    if _SPEAKER_LINE.match(text):
+        # The script leaking into the title slot. Never a name.
+        return None
+    return text
+
+
+def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | None:
+    """Ask Haiku for the article's title, or None if it cannot say.
+
+    Deliberately a separate call from generate_script.  The script prompt is
+    tuned for spoken voice; adding "and also tell me the title" to it puts the
+    prose at risk to obtain a library label, and the two would then have to be
+    revised together forever.  Cheapest model, and Read allowed only so a PDF
+    can be opened.
+
+    Never raises.  A title is a nicety — the row has three fallbacks behind
+    this one — so an API failure here must not take down a run that is
+    otherwise about to spend three minutes and real tokens.
+    """
+    if is_pdf:
+        # "Only the first page" is doing real work here, not politeness: left
+        # unbounded the model pages through the whole document looking for a
+        # better answer than the one already printed on page 1.
+        prompt = (
+            f"Read only the FIRST page of the PDF at this path — the title is "
+            f"printed there — and reply with that title and nothing else. No "
+            f"preamble, no quotes, no explanation. Do not read further pages. "
+            f"If you cannot tell, reply with the single word UNKNOWN."
+            f"\n\n{article}"
+        )
+        tools = ["Read"]
+        max_turns = PDF_TITLE_TURNS
+    else:
+        prompt = (
+            f"Reply with this article's title and nothing else. No preamble, "
+            f"no quotes, no explanation. If you cannot tell, reply with the "
+            f"single word UNKNOWN.\n\n{article[:TITLE_EXCERPT_CHARS]}"
+        )
+        tools = []
+        max_turns = TEXT_TITLE_TURNS
+
+    answer = ""
+
+    async def _ask():
+        nonlocal answer
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                model=model,
+                max_turns=max_turns,
+                allowed_tools=tools,
+                disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
+                permission_mode="bypassPermissions",
+            ),
+        ):
+            if isinstance(message, AssistantMessage):
+                parts = [
+                    block.text for block in message.content
+                    if isinstance(block, TextBlock)
+                ]
+                if parts:
+                    answer = "\n".join(parts)
+
+    try:
+        anyio.run(_ask)
+    except Exception as e:  # noqa: BLE001 — see the docstring
+        print(f"Could not read the article's title: {e}", file=sys.stderr)
+        return None
+
+    if answer.strip().upper() == "UNKNOWN":
+        return None
+    return clean_title(answer)
 
 
 # ---------------------------------------------------------------------------
@@ -909,13 +1046,24 @@ def main():
 
     # Ingest
     emit("stage", stage="ingest", status="start")
-    article, is_pdf = ingest_article(args.source)
+    article, is_pdf, page_title = ingest_article(args.source)
     if is_pdf:
         print(f"PDF: {article} (Claude will read natively)", file=sys.stderr)
         detail = "PDF, read natively"
     else:
         print(f"Article: {len(article)} characters", file=sys.stderr)
         detail = f"{len(article)} characters"
+
+    # Only under --progress-json.  The title exists to name a row in the GUI's
+    # library, so a plain CLI run must not gain an API call or its latency —
+    # with no new flags this program behaves exactly as it did, which is the
+    # regression test.  Emitted inside the ingest stage so it is available on
+    # a --script-only run too, which is stage 1 of the GUI's gated flow.
+    if _EMIT:
+        title = fetch_title(article, is_pdf) or page_title
+        if title:
+            emit("title", text=title)
+
     emit("stage", stage="ingest", status="done", detail=detail)
 
     # Generate script

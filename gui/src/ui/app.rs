@@ -6,8 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use dioxus::desktop::tao::window::ResizeDirection;
-use dioxus::desktop::{use_window, DesktopContext};
+use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 
@@ -108,13 +107,16 @@ pub fn App() -> Element {
     });
 
     let page = *state.page.read();
+    // Read here rather than in the attribute so the toggle in Settings is a
+    // dependency of this scope and the window repaints the moment it flips.
+    let translucent = state.config.read().appearance.translucent;
     let mut close_armed = use_signal(|| false);
 
     rsx! {
         head {
             link { rel: "stylesheet", href: asset!("assets/styles.css") }
         }
-        div { class: "app-container",
+        div { class: if translucent { "app-container translucent" } else { "app-container" },
             div { class: "app-body",
                 div { class: "left-column",
                     div { class: "corner-badge",
@@ -194,7 +196,6 @@ pub fn App() -> Element {
                 }
             }
             RunStrip { state }
-            ResizeEdges {}
         }
     }
 }
@@ -216,43 +217,6 @@ fn RailButton(props: RailButtonProps) -> Element {
             class: if active { "sidebar-icon active" } else { "sidebar-icon" },
             onclick: move |_| target.set(props.page),
             {props.children}
-        }
-    }
-}
-
-/// Eight invisible grab strips around the window edge.
-///
-/// `with_decorations(false)` removes the OS resize edges; these replace them.
-/// They sit above the titlebar in z-order so a grab at the very top edge
-/// resizes rather than starting a window drag.
-#[component]
-fn ResizeEdges() -> Element {
-    let window = use_window();
-
-    const EDGES: [(&str, ResizeDirection); 8] = [
-        ("n", ResizeDirection::North),
-        ("s", ResizeDirection::South),
-        ("w", ResizeDirection::West),
-        ("e", ResizeDirection::East),
-        ("nw", ResizeDirection::NorthWest),
-        ("ne", ResizeDirection::NorthEast),
-        ("sw", ResizeDirection::SouthWest),
-        ("se", ResizeDirection::SouthEast),
-    ];
-
-    rsx! {
-        for (name, dir) in EDGES {
-            div {
-                key: "{name}",
-                class: "rz {name}",
-                onmousedown: {
-                    let window: DesktopContext = window.clone();
-                    move |e: Event<MouseData>| {
-                        e.stop_propagation();
-                        let _ = window.drag_resize_window(dir);
-                    }
-                },
-            }
         }
     }
 }
@@ -337,14 +301,24 @@ fn finish_run(
     outcome: RunOutcome,
 ) {
     let snapshot = state.run.peek().clone();
+    let meta_path = library::meta_path(&paths, &req.stem);
+
+    // What the *previous* run of this stem recorded. Stage 2 shares a stem
+    // with stage 1 and replaces its whole sidecar, so without this the gated
+    // flow — the default flow — throws away the title the ingest stage went
+    // and fetched, at the moment the episode is finally finished. Synthesis
+    // emits no title event of its own and never will: it reads a script off
+    // disk and has no article to ask about.
+    let previous = library::read_meta(&meta_path);
 
     let meta = RunMeta {
+        title: snapshot.title.clone(),
         source: req.source.clone(),
         hosts: req.hosts,
         voices: req.voices.clone(),
         device: snapshot.device.clone(),
         model: snapshot.model.clone(),
-        started: started_at,
+        started: Some(started_at),
         finished: Some(chrono::Local::now()),
         elapsed_secs: Some(elapsed.as_secs()),
         outcome: match outcome {
@@ -353,8 +327,9 @@ fn finish_run(
             RunOutcome::Failed { .. } => "failed",
         }
         .to_string(),
-    };
-    let meta_path = library::meta_path(&paths, &req.stem);
+    }
+    .carrying_forward(previous.as_ref());
+
     if let Err(e) = library::write_meta(&meta_path, &meta) {
         // A missing sidecar costs the Library a row's detail, never the episode.
         tracing::warn!(error = %e, "could not write the run sidecar");

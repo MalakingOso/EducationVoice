@@ -109,11 +109,60 @@ cargo run            # or: dx serve --platform desktop
 ```
 
 It works in two stages with a review gate between them: write the script, edit
-it, then synthesize. A checkbox skips the gate and runs the CLI's one-shot path
+it, then synthesize. A toggle skips the gate and runs the CLI's one-shot path
 instead. A strip along the bottom shows the live stage, an elapsed clock, and —
 once TTS starts — a real step count, so a long run is visibly working rather
 than merely silent. Cancel signals the whole process group, which is what stops
 the `claude` grandchild along with it.
+
+The Run page is a drop target, a toggle and a button, and nothing else: drop a
+PDF or text file on it, pick one with Browse, or paste a URL. Everything set
+once — hosts, voices, the GPU, the run log — lives in Settings. Tone and length
+are not exposed and are not passed; the CLI's own defaults are what the GUI
+means by them, and omitting `--length` is what selects "let the article decide"
+rather than a duration.
+
+The Library groups episodes by the day they ran and names each row after the
+article rather than after its filename. Any row can be renamed in place, which
+is what makes the automatic naming safe to be imperfect — including for
+episodes that predate the GUI and have no run record at all.
+
+The window is undecorated and opens at 880×680 with no resize grips of its
+own; resize it with the window manager's own gesture (`Alt`/`Super` +
+right-drag on X11).
+
+The window is also translucent: the ground between cards and the frame around
+them let the desktop through, while cards, inputs and buttons stay opaque so
+nothing that has to be read sits over moving wallpaper. The blur behind it has
+to come from the compositor. GNOME exposes no blur-behind protocol to clients,
+and CSS `backdrop-filter` reaches only the page's own content, never the
+desktop behind the window. On GNOME the extension that supplies it is Blur My
+Shell:
+
+```bash
+BMS=~/.local/share/gnome-shell/extensions/blur-my-shell@aunetx/schemas
+APPS=org.gnome.shell.extensions.blur-my-shell.applications
+
+gsettings --schemadir $BMS set $APPS whitelist "['article2pod-gui*']"
+gsettings --schemadir $BMS set $APPS opacity 255
+gsettings --schemadir $BMS set $APPS corner-radius 8
+```
+
+`--schemadir` is required: the schema ships inside the extension's own
+directory, so a bare `gsettings` call reports "No such schema". The wildcard
+covers every name the binary takes — `cargo run` builds `article2pod-gui`,
+`dx serve` builds `article2pod-gui-<hash>` with a hash that changes between
+builds. `opacity 255` leaves Blur My Shell contributing blur and nothing else;
+it is one global key shared by every whitelisted app, and at its default 176 it
+multiplies with the app's own alpha and lands every glyph near 41%.
+`corner-radius 8` matches the window's radius, which otherwise shows as a
+bright sliver at each corner. All three apply live — the extension watches
+its own keys, which matters under Wayland where GNOME Shell cannot be restarted
+without ending the session.
+
+With nothing supplying a blur the result is desktop windows read through the
+frame rather than a wash, so on such a machine the switch is worth turning off:
+**Settings → Appearance → Let the desktop show through**.
 
 **On Wayland the app forces `GDK_BACKEND=x11`.** WebKitGTK's Wayland backend
 never completes its IPC handshake here, and the failure is silent: the window
@@ -131,6 +180,16 @@ The CLI gained three flags for the GUI, all additive and all off by default:
 python article2pod.py --from-script scripts/rotbigs.txt \
     --output output/ep.wav --progress-json | jq -c .
 ```
+
+`--progress-json` also buys one extra API call: during ingest, Haiku is asked
+for the article's title in a single turn, and the answer arrives as
+`{"event":"title","text":"…"}` so the Library has something to name the row.
+It is a separate call from script generation on purpose — the script prompt is
+tuned for spoken voice, and bolting "and also tell me the title" onto it would
+put the prose at risk to obtain a filename. It is gated behind the flag so a
+plain CLI run gains neither the call nor its latency, and it cannot fail a run:
+a title that does not arrive falls back to the page's `<title>`, then the
+source's last path component, then the filename stem.
 
 ## Voices
 

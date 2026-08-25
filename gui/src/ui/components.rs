@@ -155,8 +155,8 @@ pub struct ProgressBarProps {
     value: f32,
 }
 
-/// The measured progress bar. Lives only inside the run strip, because its
-/// fill is the one place `--phos` appears.
+/// The measured progress bar. Lives only inside the run strip, which is the
+/// only surface holding a denominator worth drawing.
 #[component]
 pub fn ProgressBar(props: ProgressBarProps) -> Element {
     // Clamped again here rather than trusted: a NaN width silently collapses
@@ -181,9 +181,9 @@ pub struct StageChipProps {
 
 /// Stage name plus its status dot.
 ///
-/// "Running" and "finished" differ by motion rather than hue here: the accent
-/// *is* green, so `--success` collapses into it and colour alone cannot carry
-/// the difference. The pulse on `.running` is what does.
+/// Running takes the accent and finished takes `--success`, which are distinct
+/// hues again. The pulse on `.running` stays anyway: hue alone is not a
+/// difference every reader can see.
 #[component]
 pub fn StageChip(props: StageChipProps) -> Element {
     rsx! {
