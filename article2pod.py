@@ -1,6 +1,7 @@
 """Article-to-Podcast: Convert articles into multi-host podcast audio."""
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -16,6 +17,77 @@ from bs4 import BeautifulSoup
 # side-by-side read of real output: Opus writes more densely and more
 # stiffly for spoken dialogue.  Override per-run with --model.
 SCRIPT_MODEL = "claude-sonnet-5"
+
+# ---------------------------------------------------------------------------
+# Progress protocol
+# ---------------------------------------------------------------------------
+
+# With --progress-json, stdout carries one JSON object per line and nothing
+# else, so a caller can parse it a line at a time; every human-readable
+# message stays on stderr where it has always been.  Off by default, which is
+# what keeps the CLI byte-identical for anyone running it by hand.
+_EMIT = False
+
+
+def emit(event: str, **fields) -> None:
+    """Write one progress event to stdout.  No-op unless --progress-json."""
+    if not _EMIT:
+        return
+    print(json.dumps({"event": event, **fields}), flush=True)
+
+
+def die(message: str, code: int = 1) -> None:
+    """Print a fatal message to stderr, emit a matching error event, exit.
+
+    Every fatal path goes through here rather than a bare print+sys.exit.  A
+    caller watching the event stream cannot see a SystemExit — without an
+    error event it just observes the process vanish, with nothing to show for
+    it.  `message` is printed verbatim so stderr stays exactly as it was.
+    """
+    print(message, file=sys.stderr)
+    # The event carries the bare reason; "Error: " is stderr's formatting,
+    # not part of the message.
+    emit("error", text=message.removeprefix("Error: "))
+    sys.exit(code)
+
+
+class _JsonTqdm:
+    """Stand-in for tqdm that reports diffusion steps as progress events.
+
+    VibeVoice builds its bar as `tqdm(range(max_steps), desc=..., leave=...)`
+    and then only iterates it and calls `set_description`
+    (modeling_vibevoice_inference.py:426-462).  Matching that surface is the
+    whole contract — every other method tqdm offers goes unused, so
+    implementing them would be dead code.
+
+    `max_steps` is known before the loop starts, which is what makes an
+    honest percentage possible here and impossible during script generation.
+    """
+
+    def __init__(self, iterable=None, desc=None, total=None, **kwargs):
+        self.iterable = [] if iterable is None else iterable
+        self.desc = desc
+        if total is not None:
+            self.total = total
+        else:
+            try:
+                self.total = len(self.iterable)
+            except TypeError:
+                self.total = None
+
+    def set_description(self, desc=None, refresh=True):
+        self.desc = desc
+
+    def __iter__(self):
+        # A normal episode runs ~5300 steps.  One event each would be 5300
+        # lines of JSON to move a bar that is a few hundred pixels wide, so
+        # emit at most ~200 of them.
+        every = max(1, (self.total or 200) // 200)
+        for i, item in enumerate(self.iterable):
+            if i % every == 0:
+                emit("progress", stage="tts", step=i, total=self.total)
+            yield item
+
 
 # ---------------------------------------------------------------------------
 # Article ingestion
@@ -314,6 +386,7 @@ def generate_script(
         )
 
     print("Generating podcast script with Claude...", file=sys.stderr)
+    emit("stage", stage="script", status="start", model=model)
 
     # Allow enough turns for: reading PDF (multiple pages) + research
     # lookups + brainstorm/reflect/narrow + script generation
@@ -360,6 +433,10 @@ def generate_script(
                 ]
                 if text_parts:
                     candidate = "\n".join(text_parts)
+                    # Emitted as it arrives, not at the end: this is the only
+                    # window into an otherwise silent 3-4 minute call, and it
+                    # is where the brainstorm/reflect/narrow reasoning shows.
+                    emit("message", text=candidate)
                     if len(script_re.findall(candidate)) >= 2:
                         candidates.append(candidate)
                     if len(candidate) > len(longest_text):
@@ -372,15 +449,15 @@ def generate_script(
     elif longest_text:
         # No message looked like dialogue.  Fall back to the longest text so
         # validate_script can report what actually came back.
-        print(
+        warn = (
             "Warning: no message contained Speaker lines; falling back to the "
-            "longest assistant reply",
-            file=sys.stderr,
+            "longest assistant reply"
         )
+        print(warn, file=sys.stderr)
+        emit("warning", text=warn.removeprefix("Warning: "))
         result_text = longest_text
     else:
-        print("Error: no script was generated", file=sys.stderr)
-        sys.exit(1)
+        die("Error: no script was generated")
 
     return validate_script(result_text, num_hosts)
 
@@ -421,22 +498,22 @@ def validate_script(script: str, num_hosts: int) -> str:
 
     if stripped:
         print(f"Warning: stripped {stripped} non-script lines", file=sys.stderr)
+        emit("warning", text=f"stripped {stripped} non-script lines")
     if out_of_range:
-        print(
-            f"Warning: dropped {out_of_range} lines with a speaker id outside "
-            f"1-{num_hosts}",
-            file=sys.stderr,
+        msg = (
+            f"dropped {out_of_range} lines with a speaker id outside "
+            f"1-{num_hosts}"
         )
+        print(f"Warning: {msg}", file=sys.stderr)
+        emit("warning", text=msg)
 
     if seen != allowed:
         missing = sorted(allowed - seen)
-        print(
+        die(
             f"Error: script does not match --hosts {num_hosts}. Expected "
             f"speakers {sorted(allowed)}, found {sorted(seen)}"
-            + (f" (missing {missing})" if missing else ""),
-            file=sys.stderr,
+            + (f" (missing {missing})" if missing else "")
         )
-        sys.exit(1)
 
     return "\n".join(valid)
 
@@ -459,16 +536,22 @@ VOICE_REPO_TYPE = "space"
 VOICE_REVISION = "93ece79b2871e703764f1936cfb95f28576579b8"
 VOICE_REPO_FALLBACK = "yasserrmd/VibeVoice"
 
-# Short name -> repo-relative path.  en-Alice_woman_bgm.wav is deliberately
-# excluded: it has background music baked into the reference clip, which
-# bleeds into every utterance conditioned on it.
+# Short name -> {path, gender, accent}.  en-Alice_woman_bgm.wav is
+# deliberately excluded: it has background music baked into the reference
+# clip, which bleeds into every utterance conditioned on it.
+#
+# gender and accent are data rather than end-of-line comments because a
+# voice picker has to display and filter on them.  `accent` reflects the
+# upstream locale prefix on the filename (en-/in-), which is the only accent
+# information the clips actually carry — the five en- voices are not
+# labelled any more finely than that.
 PRESET_VOICES = {
-    "alice": "voices/en-Alice_woman.wav",    # female
-    "maya": "voices/en-Maya_woman.wav",      # female
-    "frank": "voices/en-Frank_man.wav",      # male
-    "carter": "voices/en-Carter_man.wav",    # male
-    "yasser": "voices/en-Yasser_man.wav",    # male
-    "samuel": "voices/in-Samuel_man.wav",    # male, Indian accent
+    "alice":  {"path": "voices/en-Alice_woman.wav",  "gender": "female", "accent": "English"},
+    "maya":   {"path": "voices/en-Maya_woman.wav",   "gender": "female", "accent": "English"},
+    "frank":  {"path": "voices/en-Frank_man.wav",    "gender": "male",   "accent": "English"},
+    "carter": {"path": "voices/en-Carter_man.wav",   "gender": "male",   "accent": "English"},
+    "yasser": {"path": "voices/en-Yasser_man.wav",   "gender": "male",   "accent": "English"},
+    "samuel": {"path": "voices/in-Samuel_man.wav",   "gender": "male",   "accent": "Indian"},
 }
 
 # Index 0 is Speaker 1.  Alternates gender so adjacent speakers stay easy to
@@ -490,14 +573,12 @@ def fetch_voice(name: str) -> str:
     """
     key = name.strip().lower()
     if key not in PRESET_VOICES:
-        print(
+        die(
             f"Error: unknown voice '{name}'. Valid names: "
-            f"{', '.join(sorted(PRESET_VOICES))}",
-            file=sys.stderr,
+            f"{', '.join(sorted(PRESET_VOICES))}"
         )
-        sys.exit(1)
 
-    rel = PRESET_VOICES[key]
+    rel = PRESET_VOICES[key]["path"]
     local = PROJECT_ROOT / rel
     if local.is_file():
         return str(local)
@@ -518,7 +599,7 @@ def fetch_voice(name: str) -> str:
             local_dir=str(PROJECT_ROOT),
         )
     except Exception as e:
-        print(
+        die(
             f"Error: could not download voice '{key}' ({type(e).__name__}: {e})\n"
             f"  Download it manually from:\n"
             f"    https://huggingface.co/spaces/{VOICE_REPO}/blob/"
@@ -527,10 +608,8 @@ def fetch_voice(name: str) -> str:
             f"/blob/main/{rel})\n"
             f"  and place it at: {local}\n"
             f"  Or bypass presets entirely with --voice-samples PATH ...,\n"
-            f"  or run with --zero-shot to let the model invent voices.",
-            file=sys.stderr,
+            f"  or run with --zero-shot to let the model invent voices."
         )
-        sys.exit(1)
 
 
 def resolve_voices(
@@ -558,8 +637,7 @@ def resolve_voices(
         for p in voice_samples:
             path = Path(p).expanduser().resolve()
             if not path.is_file():
-                print(f"Error: voice sample not found: {path}", file=sys.stderr)
-                sys.exit(1)
+                die(f"Error: voice sample not found: {path}")
             resolved.append(str(path))
     else:
         resolved = [fetch_voice(n) for n in (voices or DEFAULT_ROSTER[hosts])]
@@ -568,20 +646,19 @@ def resolve_voices(
     # few clips means the extra speakers silently get invented, drifting
     # voices.  No error, no warning.  So check it here.
     if len(resolved) < hosts:
-        print(
+        die(
             f"Error: {len(resolved)} voice(s) given for {hosts} hosts. "
             f"VibeVoice does not validate this — it would silently invent a "
-            f"drifting voice for every speaker past the last clip.",
-            file=sys.stderr,
+            f"drifting voice for every speaker past the last clip."
         )
-        sys.exit(1)
 
     if len(resolved) > hosts:
-        print(
-            f"Warning: {len(resolved)} voices given for {hosts} hosts, "
-            f"using the first {hosts}",
-            file=sys.stderr,
+        msg = (
+            f"{len(resolved)} voices given for {hosts} hosts, "
+            f"using the first {hosts}"
         )
+        print(f"Warning: {msg}", file=sys.stderr)
+        emit("warning", text=msg)
         resolved = resolved[:hosts]
 
     for i, path in enumerate(resolved, start=1):
@@ -618,6 +695,7 @@ def synthesize_audio(
         device, dtype, attn = "cpu", torch.float32, "sdpa"
 
     print(f"Loading VibeVoice model on {device} ({dtype})...", file=sys.stderr)
+    emit("stage", stage="tts", status="start", device=device)
 
     processor = VibeVoiceProcessor.from_pretrained(tts_model)
     model = VibeVoiceForConditionalGenerationInference.from_pretrained(
@@ -628,6 +706,22 @@ def synthesize_audio(
     voice_kwargs = {}
     if voice_samples:
         voice_kwargs["voice_samples"] = voice_samples
+
+    # Swap VibeVoice's progress bar for one that speaks JSON.  It binds
+    # `tqdm` as a module-level name, so rebinding that one attribute reaches
+    # the only call site without touching the real tqdm for anything else.
+    # Guarded because this reaches into another package's internals: if an
+    # upgrade moves or renames the bar, the run has to lose its percentage,
+    # never fail.  The GUI falls back to an elapsed-only display.
+    if _EMIT:
+        mod = sys.modules.get("vibevoice.modular.modeling_vibevoice_inference")
+        if mod is not None and hasattr(mod, "tqdm"):
+            mod.tqdm = _JsonTqdm
+        else:
+            emit(
+                "warning",
+                text="progress shim unavailable; TTS progress is elapsed-only",
+            )
 
     print("Generating audio...", file=sys.stderr)
     inputs = processor(
@@ -656,6 +750,7 @@ def synthesize_audio(
     wav_path = out if out.suffix.lower() == ".wav" else out.with_suffix(".wav")
     processor.save_audio(outputs.speech_outputs[0], output_path=str(wav_path))
     print(f"Saved WAV: {wav_path}", file=sys.stderr)
+    final = wav_path
 
     # Convert to MP3 if requested
     if out.suffix.lower() == ".mp3":
@@ -665,8 +760,14 @@ def synthesize_audio(
             audio.export(str(out), format="mp3", bitrate="192k")
             wav_path.unlink()
             print(f"Converted to MP3: {out}", file=sys.stderr)
+            final = out
         except Exception as e:
             print(f"MP3 conversion failed ({e}), keeping WAV", file=sys.stderr)
+            emit("warning", text=f"MP3 conversion failed ({e}), keeping WAV")
+
+    # Reports the file that actually exists, which is not args.output when
+    # the MP3 conversion was asked for and failed.
+    emit("stage", stage="tts", status="done", path=str(final))
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +814,13 @@ def main():
         "--fetch-voices", action="store_true",
         help="Download all preset voice clips to voices/ and exit",
     )
+    parser.add_argument(
+        "--list-voices", action="store_true",
+        help=(
+            "Print the preset voices and default rosters as JSON, and exit. "
+            "Lets a front end read the roster instead of duplicating it."
+        ),
+    )
     parser.add_argument("--output", default="output/podcast.wav")
     parser.add_argument(
         "--script-only", action="store_true",
@@ -724,8 +832,35 @@ def main():
     )
     parser.add_argument("--tts-model", default="microsoft/VibeVoice-1.5B")
     parser.add_argument("--cfg-scale", type=float, default=1.3)
+    parser.add_argument(
+        "--script-out", metavar="PATH", default=None,
+        help=(
+            "Where to save the generated script. Default: script.txt beside "
+            "--output, which every run overwrites."
+        ),
+    )
+    parser.add_argument(
+        "--progress-json", action="store_true",
+        help=(
+            "Emit machine-readable progress as JSON lines on stdout. Human "
+            "output stays on stderr. Used by the GUI."
+        ),
+    )
 
     args = parser.parse_args()
+
+    global _EMIT
+    _EMIT = args.progress_json
+
+    # Answered before anything else so it stays a cheap, side-effect-free
+    # query.  Prints JSON unconditionally: that is this flag's entire output,
+    # not progress reporting, so --progress-json has no say in it.
+    if args.list_voices:
+        print(json.dumps(
+            {"voices": PRESET_VOICES, "default_roster": DEFAULT_ROSTER},
+            indent=2,
+        ))
+        return
 
     if args.fetch_voices:
         for name in sorted(PRESET_VOICES):
@@ -754,10 +889,10 @@ def main():
         # for a hand-edited file as for a generated one.
         src = Path(args.from_script).expanduser()
         if not src.is_file():
-            print(f"Error: script not found: {src}", file=sys.stderr)
-            sys.exit(1)
+            die(f"Error: script not found: {src}")
         script = validate_script(src.read_text(encoding="utf-8"), args.hosts)
         print(f"Using script: {src}", file=sys.stderr)
+        emit("stage", stage="script", status="done", path=str(src))
         synthesize_audio(
             script,
             voice_samples=voice_samples,
@@ -765,30 +900,44 @@ def main():
             tts_model=args.tts_model,
             cfg_scale=args.cfg_scale,
         )
-        print(args.output)
+        emit("done", output=args.output)
+        # stdout belongs to the event stream when --progress-json is on; the
+        # path already travelled as the tts stage's `path` field.
+        if not args.progress_json:
+            print(args.output)
         return
 
     # Ingest
+    emit("stage", stage="ingest", status="start")
     article, is_pdf = ingest_article(args.source)
     if is_pdf:
         print(f"PDF: {article} (Claude will read natively)", file=sys.stderr)
+        detail = "PDF, read natively"
     else:
         print(f"Article: {len(article)} characters", file=sys.stderr)
+        detail = f"{len(article)} characters"
+    emit("stage", stage="ingest", status="done", detail=detail)
 
     # Generate script
     script = generate_script(
         article, args.hosts, args.tone, args.length, is_pdf, args.model
     )
 
-    # Save script
-    out_dir = Path(args.output).parent
-    out_dir.mkdir(parents=True, exist_ok=True)
-    script_path = out_dir / "script.txt"
+    # Save script.  Without --script-out this is script.txt beside the audio,
+    # which every run overwrites — fine for a one-off, useless as a history.
+    if args.script_out:
+        script_path = Path(args.script_out).expanduser()
+    else:
+        script_path = Path(args.output).parent / "script.txt"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script, encoding="utf-8")
     print(f"Script saved: {script_path}", file=sys.stderr)
+    emit("stage", stage="script", status="done", path=str(script_path))
 
     if args.script_only:
-        print(script)
+        emit("done", output=str(script_path))
+        if not args.progress_json:
+            print(script)
         return
 
     # Synthesize audio
@@ -799,8 +948,22 @@ def main():
         tts_model=args.tts_model,
         cfg_scale=args.cfg_scale,
     )
-    print(args.output)
+    emit("done", output=args.output)
+    if not args.progress_json:
+        print(args.output)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        # die() and argparse already emitted whatever there was to say.
+        raise
+    except KeyboardInterrupt:
+        emit("error", text="interrupted")
+        sys.exit(130)
+    except Exception as e:
+        # Re-raised so the traceback still reaches stderr exactly as before;
+        # the event only makes the failure visible to a machine reader.
+        emit("error", text=f"{type(e).__name__}: {e}")
+        raise
