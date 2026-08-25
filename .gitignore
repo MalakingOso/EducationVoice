@@ -30,12 +30,19 @@ dist/
 Thumbs.db
 desktop.ini
 
-# Project outputs
+# Project outputs — generated audio and the scratch script from each run.
+# Saved scripts worth keeping live in scripts/ and ARE tracked; the audio
+# never is (large, regenerable from the script in ~11 min).
 output/
 *.wav
 *.mp3
 *.flac
 *.ogg
+!scripts/*.txt
+
+# Downloaded VibeVoice preset voice clips (contents already match *.wav;
+# this entry records the intent)
+voices/
 
 # Local / scratch
 _ul
