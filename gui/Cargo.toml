@@ -34,3 +34,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

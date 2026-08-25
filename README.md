@@ -97,6 +97,41 @@ episode is about **16 minutes of wall time** end to end. Most of that is a singl
 Python process — it is not hung. The TTS half is host-bound, so a faster GPU does not help
 (see [Which GPU](#which-gpu--benchmarked)).
 
+## Desktop app
+
+A Dioxus GUI over the same pipeline lives in `gui/`. It shells out to
+`.venv/bin/python article2pod.py`, so it runs exactly the code the CLI runs and
+inherits the same pinned interpreter.
+
+```bash
+cd gui
+cargo run            # or: dx serve --platform desktop
+```
+
+It works in two stages with a review gate between them: write the script, edit
+it, then synthesize. A checkbox skips the gate and runs the CLI's one-shot path
+instead. A strip along the bottom shows the live stage, an elapsed clock, and —
+once TTS starts — a real step count, so a long run is visibly working rather
+than merely silent. Cancel signals the whole process group, which is what stops
+the `claude` grandchild along with it.
+
+**On Wayland the app forces `GDK_BACKEND=x11`.** WebKitGTK's Wayland backend
+never completes its IPC handshake here, and the failure is silent: the window
+opens and renders, but no async task ever runs, so it looks healthy and does
+nothing. Set `ARTICLE2POD_KEEP_GDK_BACKEND=1` to opt out once that is fixed
+upstream.
+
+The CLI gained three flags for the GUI, all additive and all off by default:
+`--progress-json` (JSON-lines events on stdout, human text stays on stderr),
+`--script-out PATH` (so each run keeps its own script instead of overwriting
+`output/script.txt`), and `--list-voices` (the roster as JSON).
+
+```bash
+# Watch the event stream the GUI consumes
+python article2pod.py --from-script scripts/rotbigs.txt \
+    --output output/ep.wav --progress-json | jq -c .
+```
+
 ## Voices
 
 VibeVoice clones whichever reference clip you give it. **Without a reference it does not pick

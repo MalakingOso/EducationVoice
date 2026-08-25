@@ -33,12 +33,18 @@ async fn main() -> Result<()> {
     // `--cancel-after N` is the point of this binary as much as the streaming
     // is: it is how the "no orphaned claude" check is run.
     let mut cancel_after: Option<u64> = None;
+    let mut gpu_mask: Option<String> = None;
     let mut positional: Vec<String> = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--cancel-after" => {
                 cancel_after = Some(it.next().unwrap_or_default().parse()?);
+            }
+            // Proves ZE_AFFINITY_MASK actually reaches the child, which is
+            // otherwise only visible as "the run used the card I expected".
+            "--gpu" => {
+                gpu_mask = it.next();
             }
             _ => positional.push(a),
         }
@@ -82,7 +88,7 @@ async fn main() -> Result<()> {
     println!("---");
 
     let started = std::time::Instant::now();
-    let mut session = runner::spawn(&paths, &kind, None)?;
+    let mut session = runner::spawn(&paths, &kind, gpu_mask.as_deref())?;
     println!("pgid:   {}", session.pgid);
 
     if let Some(secs) = cancel_after {
@@ -143,5 +149,5 @@ const USAGE: &str = "\
 usage:
   run_smoke list-voices
   run_smoke fetch-voices
-  run_smoke synth  <script> <hosts> <output> [voice ...] [--cancel-after S]
+  run_smoke synth  <script> <hosts> <output> [voice ...] [--cancel-after S] [--gpu N]
   run_smoke script <source> <hosts> <script-out>         [--cancel-after S]";
