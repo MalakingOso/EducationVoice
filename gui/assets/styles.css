@@ -69,6 +69,14 @@
   --success: #16A34A;
   --warn: #CA8A04;   /* tokenized; Beamer hardcodes this once at .log-level-warn */
 
+  /* Script editor speaker stripes — four slots, `--hosts` never exceeds 4.
+     Speaker 1 reuses the accent; 2-4 are fresh hues distinct from --danger,
+     --success and --warn so a stripe color is never mistaken for a status. */
+  --speaker-1: var(--accent);
+  --speaker-2: #B2540B;
+  --speaker-3: #3F7D53;
+  --speaker-4: #6B4FA0;
+
   /* Radii */
   --radius: 4px;
   --radius-md: 6px;
@@ -829,6 +837,16 @@ body {
 .btn-icon.remove:hover {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.btn-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-icon:disabled:hover {
+  background: var(--bg-surface);
+  color: var(--fg-muted);
 }
 
 /* ===== Status Dot ===== */
@@ -1866,30 +1884,229 @@ body {
 }
 
 /* ── Script editor ────────────────────────────────────────────────────────
-   The draft is prose, so it keeps the body face; only the counts are mono. */
+   The draft is prose, so it keeps the body face; only the counts, and the
+   turn labels, are mono. Structured is the default view; Raw is kept as the
+   literal escape hatch for a bulk paste-in, styled exactly as the old
+   single-textarea editor was. */
 
 .script-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.script-editor-modes {
+  display: flex;
+  gap: 4px;
+}
+
+.mode-btn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.mode-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.mode-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.script-editor-raw {
   width: 100%;
   min-height: 320px;
   padding: 12px;
   font-family: inherit;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--fg);
-  background: var(--bg-surface);
-  border: 2px solid var(--border);
-  border-radius: var(--radius-md);
   resize: vertical;
-  transition: border-color var(--duration-fast) var(--ease);
 }
 
-.script-editor:hover {
-  border-color: var(--border-strong);
+.script-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.script-editor:focus {
+.script-turn,
+.script-raw {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+}
+
+.script-turn {
+  background: var(--bg-recessed);
+  max-width: 70%;
+}
+
+.script-turn.turn-left {
+  align-self: flex-start;
+}
+
+.script-turn.turn-right {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.script-turn.turn-editing {
+  width: 70%;
+}
+
+.script-raw {
+  background: var(--bg-recessed);
+  border: 2px dashed var(--border);
+}
+
+.script-turn-stripe {
+  width: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.script-turn-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.script-turn-label {
+  font-family: "DM Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  margin-bottom: 2px;
+}
+
+.out-of-range .script-turn-label {
+  color: var(--danger);
+}
+
+.script-turn-text {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  min-height: 44px;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.script-turn-body textarea.script-turn-text {
+  width: 100%;
+  resize: vertical;
+}
+
+.script-turn-body div.script-turn-text {
+  cursor: pointer;
+}
+
+.script-raw .script-turn-text {
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+  color: var(--fg-secondary);
+  min-height: 32px;
+}
+
+.script-turn-text:hover {
+  background: var(--accent-wash);
+}
+
+.script-turn-text:focus {
   outline: none;
-  border-color: var(--accent);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+/* Anchored to the turn's own box (position: relative on .script-turn /
+   .script-raw above) rather than a page-level overlay, and hidden by
+   opacity rather than display, matching the Library card idiom. */
+.script-turn-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.script-turn.turn-left .script-turn-actions {
+  left: 6px;
+  right: auto;
+}
+
+.script-turn:hover .script-turn-actions,
+.script-turn:focus-within .script-turn-actions,
+.script-raw:hover .script-turn-actions,
+.script-raw:focus-within .script-turn-actions {
+  opacity: 1;
+}
+
+.turn-action-btn {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.turn-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.turn-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.turn-action-btn.remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.turn-action-btn.armed,
+.turn-action-btn.armed:hover {
+  background: var(--danger);
+  color: var(--bg-surface);
+  border-color: var(--danger);
 }
 
 .script-meta {
@@ -1921,8 +2138,8 @@ body {
 }
 
 /* The title doubles as the rename affordance, so it has to look pressable
-   without becoming a button — the row is already clickable in three places. */
-.library-row-title:hover {
+   without becoming a button — the card is already clickable in three places. */
+.library-card-title:hover {
   color: var(--accent);
 }
 
@@ -1932,14 +2149,15 @@ body {
 }
 
 /* ── Library ──────────────────────────────────────────────────────────────
-   Row actions stay hidden until the row is hovered, as elsewhere. */
+   Stacked cards rather than a single flex line, so a long title wraps
+   instead of being clipped. The action row still stays hidden until
+   hovered, as elsewhere — opacity rather than display, so nothing jumps. */
 
-.library-row {
+.library-card {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  min-height: 44px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
   background: var(--bg-surface);
   border: 2px solid var(--border);
   border-radius: var(--radius-md);
@@ -1948,43 +2166,38 @@ body {
               box-shadow var(--duration-fast) var(--ease);
 }
 
-.library-row + .library-row {
+.library-card + .library-card {
   margin-top: 8px;
 }
 
-.library-row:hover {
+.library-card:hover {
   background: var(--bg-hover);
   box-shadow: var(--shadow-card);
 }
 
-.library-row-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+.library-card-title {
   font-size: 13px;
   color: var(--fg);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.library-row-meta {
-  flex-shrink: 0;
+.library-card-meta {
   font-family: "DM Mono", monospace;
   font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.library-row-actions {
+.library-card-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease);
 }
 
-.library-row:hover .library-row-actions {
+.library-card:hover .library-card-actions {
   opacity: 1;
 }
 

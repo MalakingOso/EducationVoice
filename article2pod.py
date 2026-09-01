@@ -18,6 +18,14 @@ from bs4 import BeautifulSoup
 # stiffly for spoken dialogue.  Override per-run with --model.
 SCRIPT_MODEL = "claude-sonnet-5"
 
+# Claude model used for the creative-director edit pass that follows script
+# generation.  Deliberately the opposite choice from SCRIPT_MODEL's rationale
+# above: that finding was about *generating* flowing spoken dialogue, and
+# this pass is a different task — critical, discerning judgment on an
+# existing draft, which is where Opus's density earns its keep instead of
+# hurting.  Override per-run with --edit-model.
+EDIT_MODEL = "claude-opus-5"
+
 # The model that answers "what is this article called?".  Deliberately the
 # cheapest one: naming a row in a library is not a reasoning problem, and this
 # call is pure overhead on every run that makes it.
@@ -261,8 +269,8 @@ def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | N
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You write podcast scripts from articles — real conversation between \
-hosts, not a lecture. Audience: surgical fellows. Peer-to-peer level. \
+You write podcast scripts from medical articles \
+Audience: surgical fellows. Peer-to-peer level. \
 Assume full command of medical terminology, anatomy, pharmacology, and \
 statistics. Do not simplify \
 jargon any surgical trainee would know. \
@@ -277,103 +285,20 @@ VOICE — hard rules:
 - No meta-commentary ("This is a complex topic", "There are several \
 factors to consider").
 - No bullet-list cadence — write in natural conversational prose.
-- Sound like a direct, knowledgeable colleague: answer first, explain \
-second, skip the performance.
-- BANNED — antithesis by negation. Do not define anything by what it is \
-not. No "X, not Y" ("the signal is the approach class, not the \
-platform"). No "it isn't A, it's B". No "not just X but Y". No "A is \
-not the same as B". No "what I'd say is". No "the real question isn't \
-X, it's Y". This construction is the single strongest tell of \
-AI-written dialogue and it appears nowhere in real speech at this \
-density. State the positive claim and stop. If you catch yourself \
-reaching for a contrast, delete the negated half and keep only the \
-assertion — "the approach class is what matters" says the same thing.
+- Don't define things by what they're not ("X, not Y") — state the claim \
+and stop.
+- Disagree flatly, the way a colleague does, not with hedges ("I'd push \
+back", "to be fair").
+- Write the way two people actually talk to each other — loose, \
+specific, unrehearsed.
 - Do not end turns on a rhetorical flourish or a summarizing kicker. \
 Real people trail off, hand over mid-thought, or just stop.
-- BANNED — hedged-disagreement stock phrases. Never write "push back", \
-"I'd push back on that", "I'd challenge that", "playing devil's \
-advocate", "to be fair", "that said", "fair point", "I hear you, but", \
-"where I'd differ". Disagree the way a colleague actually does: say the \
-opposing thing flatly. "That's overselling it." "The bleeding data \
-doesn't support that." "I don't buy it." No throat-clearing before the \
-objection.
-
-Discouraged vocabulary — overused in AI-generated text, sounds formulaic. \
-Default to concrete, specific alternatives. Use a word from this list \
-only when it is genuinely the best fit and no natural substitute exists: \
-a journey of, a multitude of, a plethora of, a testament to, actionable \
-insights, adept, adoption rate, aforementioned, agile, ai-powered, \
-aligns, ample opportunities, amplify, arduous, as such, at length, \
-at the end of the day, augment, bandwidth, based on the information \
-provided, best practices, blockchain-enabled, brand awareness, broadly \
-speaking, burgeoning, cannot be overstated, capacity building, \
-captivating, change management, cloud-based, cognizant, collaborative \
-environment, commendable, competitive landscape, complexity, \
-conceptualize, considerable, continuous improvement, core, cost \
-optimization, craft, critical, customer-centric, data-driven, \
-decision-makers, deep understanding, deliverables, delve, delved, \
-delving, demonstrates significant, deployment plan, digital realm, \
-digital transformation, disruptive innovation, domain expertise, \
-downtime, drive, driven approach, driving innovation, dynamic, dynamic \
-environment, efficiency, embark, embark on a journey, embarked, emerging \
-technologies, enable, encountered hurdles, enhance, enhancing, \
-enlightening, enriches, entails, entrenched, epicenter, essentially, \
-esteemed, ethical considerations, ever-evolving, excels, exciting, \
-exemplary, expertise, explore, facilitate, flourishing, folks, foray, \
-foster innovation, fostering, fresh perspectives, from inception to \
-execution, fundamental, fundamentally, future-proof, game changer, \
-generally speaking, given that, glean, going forward, golden ticket, \
-governance framework, granular detail, granular level, granularly, \
-grasp, growing recognition, hinder, holistically, impactful, \
-implementation strategy, implications, important to consider, in a sea \
-of, in brief, in detail, in effect, in general, in light of, in other \
-words, in particular, in practice, in terms of, in the dynamic world of, \
-in the realm of, in theory, in today's rapidly evolving market, \
-in today's world, industry best practices, influencers, innovative, \
-insights into, invaluable, issue resolution, it's important to \
-remember, iteration, kaleidoscope, key, key takeaways, knowledge \
-transfer, kpis, latency, linchpin, low-level, manifold, market \
-penetration, market share, market trends, maximize, milestone, \
-mission-critical, moving forward, mvp, namely, navigating the landscape, \
-navigating the complexities of, nevertheless, new heights, \
-next-generation, notable, numerous, offer a comprehensive, offerings, \
-on the ascent to, on the contrary, on the cutting edge, on the other \
-hand, operational efficiency, operational excellence, pain point, \
-paradigm shift, particularly in areas, performance optimization, \
-pervasive, pivotal, plethora, preemptively, primary, problem solving, \
-process optimization, profitability, profound, promote, pronged, quality \
-assurance, quality control, rapidly evolving, reaching new heights, \
-realm, recognize, regulatory compliance, relentless, remarkable, \
-resonate, resource allocation, resource optimization, revenue growth, \
-risk mitigation, roadmap, robust, roi, root cause analysis, scalable, \
-scrum, seamless, secondary, shed light, shedding light on, showcasing, \
-significant, significantly contributes, simply put, sla, solution \
-development, specifically speaking, sprint, stakeholders, \
-state-of-the-art, strategic alignment, streamline, strive, strong \
-presence, subject matter experts, substantial, substantially, \
-sustainability, synergistically, synergy, systemic, tailor, tapestry, \
-tco, tertiary, that being said, the future of, the linchpin of, \
-the next frontier, the power of, the road ahead, thereby, therefore, \
-therein, thereof, thought leaders, thought leadership, \
-thought-provoking, thrive, thriving, throughput, time optimization, \
-to clarify, to demonstrate, to elucidate, to emphasize, to enrich, \
-to exemplify, to furnish, to highlight, to illustrate, to maximize, \
-to provide, to reiterate, to shed light on, to showcase, to summarize, \
-to thrive, to underscore, to unleash, to unlock, touchpoint, \
-transformation, transformative, transforming the way, treasure trove, \
-ultimately, uncharted waters, undeniable, underscores, understanding of \
-your unique, undoubtedly, unleash, unlock, unparalleled, uptime, \
-user engagement, user experience, user feedback, user interface, \
-utilize, utmost, valuable, value proposition, value-added, various, \
-vast, vibrant, vital, well-crafted, whilst, whilst it is true, \
-widely recognized, with a keen eye on, with regards to.
 
 FORMAT:
 - Output ONLY the script — no preamble, commentary, or files. Do not \
 use the Write or Edit tools.
 - Every line: Speaker N: dialogue text (N from 1 to {num_hosts})
-- Speaker 1 is the lead host. Others ask questions, add insights, and \
-disagree when they have reason to.
+- All speakers are experts, there is no lead. 
 {length_guidance}
 - Tone: {tone}.
 - No stage directions, sound effects, or [brackets].
@@ -399,13 +324,13 @@ for methods/drugs/devices/protocols, WebSearch for guideline updates \
 and recent developments. This is not optional.
 - The research is for you, the writer — not for the listener. It is what \
 lets the hosts sound like people who already know this literature. Most \
-of it should never be said aloud; it shows up as confidence about which \
-numbers matter and which do not.
+of it should never be said aloud \
+
 - Name a study only when it changes how you read THIS paper: it \
 contradicts the result, it is the trial this one aims to displace, it \
 explains a design choice, or it is the guideline this would change. Two \
-or three named sources in an episode is normal. More than four is a \
-bibliography, not a conversation.
+or three named sources in an episode is normal. 
+
 - When you do name a source, use first author + year (e.g., "the Smith \
 2023 trial in JAMA") or the trial name (e.g., "the RECOVERY trial"). \
 Never "some studies show" or "the literature suggests".
@@ -477,6 +402,204 @@ can follow on a commute and come away actually understanding the paper. \
 Never rush a point to save time and never stretch one to fill time."""
 
 
+# Overused in AI-generated text, sounds formulaic in spoken dialogue.  Lives
+# here rather than inline in EDITOR_SYSTEM_PROMPT so it is defined once and
+# interpolated, not duplicated between the writer and editor prompts.
+DISCOURAGED_VOCABULARY = """\
+a journey of, a multitude of, a plethora of, a testament to, actionable \
+insights, adept, adoption rate, aforementioned, agile, ai-powered, \
+aligns, ample opportunities, amplify, arduous, as such, at length, \
+at the end of the day, augment, bandwidth, based on the information \
+provided, best practices, blockchain-enabled, brand awareness, broadly \
+speaking, burgeoning, cannot be overstated, capacity building, \
+captivating, change management, cloud-based, cognizant, collaborative \
+environment, commendable, competitive landscape, complexity, \
+conceptualize, considerable, continuous improvement, core, cost \
+optimization, craft, critical, customer-centric, data-driven, \
+decision-makers, deep understanding, deliverables, delve, delved, \
+delving, demonstrates significant, deployment plan, digital realm, \
+digital transformation, disruptive innovation, domain expertise, \
+downtime, drive, driven approach, driving innovation, dynamic, dynamic \
+environment, efficiency, embark, embark on a journey, embarked, emerging \
+technologies, enable, encountered hurdles, enhance, enhancing, \
+enlightening, enriches, entails, entrenched, epicenter, essentially, \
+esteemed, ethical considerations, ever-evolving, excels, exciting, \
+exemplary, expertise, explore, facilitate, flourishing, folks, foray, \
+foster innovation, fostering, fresh perspectives, from inception to \
+execution, fundamental, fundamentally, future-proof, game changer, \
+generally speaking, given that, glean, going forward, golden ticket, \
+governance framework, granular detail, granular level, granularly, \
+grasp, growing recognition, hinder, holistically, impactful, \
+implementation strategy, implications, important to consider, in a sea \
+of, in brief, in detail, in effect, in general, in light of, in other \
+words, in particular, in practice, in terms of, in the dynamic world of, \
+in the realm of, in theory, in today's rapidly evolving market, \
+in today's world, industry best practices, influencers, innovative, \
+insights into, invaluable, issue resolution, it's important to \
+remember, iteration, kaleidoscope, key, key takeaways, knowledge \
+transfer, kpis, latency, linchpin, low-level, manifold, market \
+penetration, market share, market trends, maximize, milestone, \
+mission-critical, moving forward, mvp, namely, navigating the landscape, \
+navigating the complexities of, nevertheless, new heights, \
+next-generation, notable, numerous, offer a comprehensive, offerings, \
+on the ascent to, on the contrary, on the cutting edge, on the other \
+hand, operational efficiency, operational excellence, pain point, \
+paradigm shift, particularly in areas, performance optimization, \
+pervasive, pivotal, plethora, preemptively, primary, problem solving, \
+process optimization, profitability, profound, promote, pronged, quality \
+assurance, quality control, rapidly evolving, reaching new heights, \
+realm, recognize, regulatory compliance, relentless, remarkable, \
+resonate, resource allocation, resource optimization, revenue growth, \
+risk mitigation, roadmap, robust, roi, root cause analysis, scalable, \
+scrum, seamless, secondary, shed light, shedding light on, showcasing, \
+significant, significantly contributes, simply put, sla, solution \
+development, specifically speaking, sprint, stakeholders, \
+state-of-the-art, strategic alignment, streamline, strive, strong \
+presence, subject matter experts, substantial, substantially, \
+sustainability, synergistically, synergy, systemic, tailor, tapestry, \
+tco, tertiary, that being said, the future of, the linchpin of, \
+the next frontier, the power of, the road ahead, thereby, therefore, \
+therein, thereof, thought leaders, thought leadership, \
+thought-provoking, thrive, thriving, throughput, time optimization, \
+to clarify, to demonstrate, to elucidate, to emphasize, to enrich, \
+to exemplify, to furnish, to highlight, to illustrate, to maximize, \
+to provide, to reiterate, to shed light on, to showcase, to summarize, \
+to thrive, to underscore, to unleash, to unlock, touchpoint, \
+transformation, transformative, transforming the way, treasure trove, \
+ultimately, uncharted waters, undeniable, underscores, understanding of \
+your unique, undoubtedly, unleash, unlock, unparalleled, uptime, \
+user engagement, user experience, user feedback, user interface, \
+utilize, utmost, valuable, value proposition, value-added, various, \
+vast, vibrant, vital, well-crafted, whilst, whilst it is true, \
+widely recognized, with a keen eye on, with regards to."""
+
+
+EDITOR_SYSTEM_PROMPT = """\
+You're the creative director for this podcast, brought in after a writer has \
+already produced a full draft. Nobody hired you to check spelling. Your job \
+is the one thing a director does that nobody else does: listen to a scene \
+and know, in your gut, whether it plays like two people talking or like a \
+script being performed as two people. You have a trained ear for exactly \
+where the artifice shows.
+
+THE BIGGEST TELL: any line that defines something by what it ISN'T instead \
+of just saying what it IS. "X, not Y." "It isn't A, it's B." "Not just X \
+but Y." "What I'd say is—." "The real question isn't X, it's Y." This \
+construction barely occurs in real conversation — it's a model hedging \
+toward precision instead of committing to a claim. Every time you find it, \
+kill the negated half and keep only the assertion.
+
+SECOND: rehearsed disagreement. "I'd push back on that." "To be fair—." \
+"That said—." "I hear you, but—." "Where I'd differ is—." Nobody talks to a \
+colleague like this. Real disagreement is flat: "That's overselling it." "I \
+don't buy it." "The data doesn't support that." Find the hedge, cut the \
+throat-clearing, keep the objection.
+
+THIRD: pitch-deck vocabulary leaking into a conversation between two \
+surgeons. Anything on this list reads as corporate or generated, never \
+spoken: {discouraged_vocabulary}
+Where a line uses one of these, don't swap in a synonym and call it fixed — \
+that just moves the seam to a different word. Rewrite the sentence the way \
+this person would actually say the thing underneath it.
+
+ALSO WATCH FOR: affirmation openers ("Certainly", "Great question"), AI \
+framing ("it's important to note", "in summary"), meta-commentary about the \
+topic being complex, bullet-list cadence dressed as sentences, and turns \
+that end on a tidy rhetorical bow instead of trailing off or handing over \
+mid-thought the way real people do.
+
+HOW TO WORK:
+Read the whole script once, straight through, the way a listener would, \
+before touching anything. Notice every place the illusion breaks. Then go \
+back and fix only those places — a line that's already working doesn't \
+need your fingerprints on it.
+
+Rewrite in full sentences, in voice — never a word-for-word substitution. A \
+mechanical swap is exactly as detectable as what it replaced, just with a \
+different word in the slot.
+
+WHAT YOU MUST NOT TOUCH: every fact, number, citation, study name, and \
+clinical claim stays exactly as reported — you're editing performance, not \
+content. Keep exactly {num_hosts} speakers and the Speaker N: format. \
+Don't add material or cut substance.
+
+Work through the script in a message of its own first, noting what you're \
+fixing and why — that's for the record, not the listener. Your final \
+message must contain only the corrected script: Speaker N: lines, nothing \
+else."""
+
+
+def _run_pass(
+    system: str,
+    user_msg: str,
+    model: str,
+    allowed_tools: list[str],
+    disallowed_tools: list[str],
+    max_turns: int,
+    effort: str | None = None,
+) -> str:
+    """Run one query() to completion and return its selected raw text.
+
+    Shared by the writer and editor passes in generate_script.  Selection is
+    by *shape* rather than length: both passes think out loud in a message of
+    its own before producing the script (brainstorm/reflect/narrow for the
+    writer, "here's what I'm fixing" for the editor), and that reasoning
+    prose can easily be longer than the script itself.  Only messages that
+    actually contain dialogue lines count, and the last such message wins —
+    that is the finished draft, after any revision.
+    """
+    script_re = re.compile(r"^Speaker \d+:", re.M)
+    candidates: list[str] = []
+    longest_text = ""
+
+    async def _run():
+        nonlocal longest_text
+        async for message in query(
+            prompt=user_msg,
+            options=ClaudeAgentOptions(
+                system_prompt=system,
+                model=model,
+                max_turns=max_turns,
+                allowed_tools=allowed_tools,
+                disallowed_tools=disallowed_tools,
+                permission_mode="bypassPermissions",
+                effort=effort,
+            ),
+        ):
+            if isinstance(message, AssistantMessage):
+                text_parts = [
+                    block.text for block in message.content
+                    if isinstance(block, TextBlock)
+                ]
+                if text_parts:
+                    candidate = "\n".join(text_parts)
+                    # Emitted as it arrives, not at the end: this is the only
+                    # window into an otherwise silent multi-minute call, and
+                    # it is where the brainstorm/reflect/narrow reasoning (or
+                    # the editor's own fix commentary) shows.
+                    emit("message", text=candidate)
+                    if len(script_re.findall(candidate)) >= 2:
+                        candidates.append(candidate)
+                    if len(candidate) > len(longest_text):
+                        longest_text = candidate
+
+    anyio.run(_run)
+
+    if candidates:
+        return candidates[-1]
+    if longest_text:
+        # No message looked like dialogue.  Fall back to the longest text so
+        # validate_script can report what actually came back.
+        warn = (
+            "Warning: no message contained Speaker lines; falling back to the "
+            "longest assistant reply"
+        )
+        print(warn, file=sys.stderr)
+        emit("warning", text=warn.removeprefix("Warning: "))
+        return longest_text
+    die("Error: no script was generated")
+
+
 def generate_script(
     article_text: str,
     num_hosts: int = 2,
@@ -484,8 +607,18 @@ def generate_script(
     target_length: str | None = None,
     is_pdf: bool = False,
     model: str = SCRIPT_MODEL,
+    edit_model: str = EDIT_MODEL,
+    draft_out: Path | None = None,
 ) -> str:
-    """Generate a podcast script from article text using Claude Agent SDK."""
+    """Generate a podcast script from article text using Claude Agent SDK.
+
+    Two sequential calls: a writer pass that researches and drafts, then a
+    fresh creative-director pass that edits the draft for AI-sounding tells.
+    Fresh eyes matter here — the model that just wrote a stilted line is poor
+    at noticing its own tic, so the editor is a separate model instance with
+    no memory of drafting it.  `draft_out`, if given, gets the writer's
+    pre-edit output so the two can be diffed while tuning the editor prompt.
+    """
     if target_length:
         length_guidance = (
             f"- Length: roughly {target_length}, but do not pad or rush to "
@@ -527,76 +660,53 @@ def generate_script(
 
     # Allow enough turns for: reading PDF (multiple pages) + research
     # lookups + brainstorm/reflect/narrow + script generation
-    max_turns = 30
+    draft_raw = _run_pass(
+        system=system,
+        user_msg=user_msg,
+        model=model,
+        allowed_tools=[
+            "Read",
+            "WebSearch",
+            "WebFetch",
+            "mcp__claude_ai_PubMed__search_articles",
+            "mcp__claude_ai_PubMed__get_full_text_article",
+            "mcp__claude_ai_PubMed__get_article_metadata",
+            "mcp__claude_ai_PubMed__find_related_articles",
+            "mcp__plugin_context7_context7__resolve-library-id",
+            "mcp__plugin_context7_context7__query-docs",
+        ],
+        disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
+        max_turns=30,
+        # Highest reasoning depth for the writer pass — this is the research
+        # + brainstorm/reflect/narrow + write call, where more thinking has
+        # room to pay off. xhigh is a real effort level on Sonnet 5 (not
+        # Opus-only, despite what the SDK's own docstring for this field
+        # claims — verified against current API docs).
+        effort="xhigh",
+    )
+    draft = validate_script(draft_raw, num_hosts)
 
-    # Candidate scripts, in the order Claude produced them.  We select by
-    # *shape* rather than length: the model now brainstorms and reflects out
-    # loud before writing, and that planning prose can easily be longer than
-    # the script itself.  Only messages that actually contain dialogue lines
-    # count, and the last such message wins — that is the finished draft,
-    # after any revision.
-    script_re = re.compile(r"^Speaker \d+:", re.M)
-    candidates: list[str] = []
-    longest_text = ""
+    if draft_out:
+        draft_out.write_text(draft, encoding="utf-8")
+        print(f"Draft (pre-edit) saved: {draft_out}", file=sys.stderr)
 
-    async def _generate():
-        nonlocal longest_text
-        async for message in query(
-            prompt=user_msg,
-            options=ClaudeAgentOptions(
-                system_prompt=system,
-                model=model,
-                max_turns=max_turns,
-                allowed_tools=[
-                    "Read",
-                    "WebSearch",
-                    "WebFetch",
-                    "mcp__claude_ai_PubMed__search_articles",
-                    "mcp__claude_ai_PubMed__get_full_text_article",
-                    "mcp__claude_ai_PubMed__get_article_metadata",
-                    "mcp__claude_ai_PubMed__find_related_articles",
-                    "mcp__plugin_context7_context7__resolve-library-id",
-                    "mcp__plugin_context7_context7__query-docs",
-                ],
-                disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
-                permission_mode="bypassPermissions",
-            ),
-        ):
-            if isinstance(message, AssistantMessage):
-                # Extract text blocks from the last assistant message
-                text_parts = [
-                    block.text for block in message.content
-                    if isinstance(block, TextBlock)
-                ]
-                if text_parts:
-                    candidate = "\n".join(text_parts)
-                    # Emitted as it arrives, not at the end: this is the only
-                    # window into an otherwise silent 3-4 minute call, and it
-                    # is where the brainstorm/reflect/narrow reasoning shows.
-                    emit("message", text=candidate)
-                    if len(script_re.findall(candidate)) >= 2:
-                        candidates.append(candidate)
-                    if len(candidate) > len(longest_text):
-                        longest_text = candidate
+    print("Editing script with Claude...", file=sys.stderr)
+    editor_system = EDITOR_SYSTEM_PROMPT.format(
+        discouraged_vocabulary=DISCOURAGED_VOCABULARY,
+        num_hosts=num_hosts,
+    )
+    # Closed-book text pass — no tools needed, everything it needs is already
+    # in the draft.
+    edited_raw = _run_pass(
+        system=editor_system,
+        user_msg=draft,
+        model=edit_model,
+        allowed_tools=[],
+        disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
+        max_turns=5,
+    )
 
-    anyio.run(_generate)
-
-    if candidates:
-        result_text = candidates[-1]
-    elif longest_text:
-        # No message looked like dialogue.  Fall back to the longest text so
-        # validate_script can report what actually came back.
-        warn = (
-            "Warning: no message contained Speaker lines; falling back to the "
-            "longest assistant reply"
-        )
-        print(warn, file=sys.stderr)
-        emit("warning", text=warn.removeprefix("Warning: "))
-        result_text = longest_text
-    else:
-        die("Error: no script was generated")
-
-    return validate_script(result_text, num_hosts)
+    return validate_script(edited_raw, num_hosts)
 
 
 def validate_script(script: str, num_hosts: int) -> str:
@@ -926,6 +1036,10 @@ def main():
         help="Optional length steer. By default the article's density sets it.",
     )
     parser.add_argument("--model", default=SCRIPT_MODEL, help="Claude model")
+    parser.add_argument(
+        "--edit-model", default=EDIT_MODEL,
+        help="Claude model for the creative-director edit pass",
+    )
 
     voice_group = parser.add_mutually_exclusive_group()
     voice_group.add_argument(
@@ -1066,18 +1180,23 @@ def main():
 
     emit("stage", stage="ingest", status="done", detail=detail)
 
-    # Generate script
-    script = generate_script(
-        article, args.hosts, args.tone, args.length, is_pdf, args.model
-    )
-
     # Save script.  Without --script-out this is script.txt beside the audio,
     # which every run overwrites — fine for a one-off, useless as a history.
+    # The pre-edit draft is written alongside it as script.draft.txt, so the
+    # writer-only pass can be diffed against the edited one.
     if args.script_out:
         script_path = Path(args.script_out).expanduser()
     else:
         script_path = Path(args.output).parent / "script.txt"
     script_path.parent.mkdir(parents=True, exist_ok=True)
+    draft_path = script_path.with_name(script_path.stem + ".draft" + script_path.suffix)
+
+    # Generate script
+    script = generate_script(
+        article, args.hosts, args.tone, args.length, is_pdf, args.model,
+        args.edit_model, draft_path,
+    )
+
     script_path.write_text(script, encoding="utf-8")
     print(f"Script saved: {script_path}", file=sys.stderr)
     emit("stage", stage="script", status="done", path=str(script_path))

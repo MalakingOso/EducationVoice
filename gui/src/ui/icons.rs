@@ -15,6 +15,40 @@ pub struct IconProps {
     pub class: String,
 }
 
+// ─── The mark ────────────────────────────────────────────────────────────────
+
+/// The app's symbol: the six rounded squares from `assets/icon.png`, without
+/// the charcoal tile they sit on there.
+///
+/// The one exception to the single-path rule above, and a deliberate one. The
+/// PNG draws the symbol for a dark ground, so its cap is off-white and one of
+/// its outlines is white; lifted onto the light page those vanish. Each shape
+/// is therefore its own element with its own class, coloured in styles.css
+/// under `.mark-*`, where the fills can take the icon's own greys and the cap
+/// the surface colour with an outline that survives the ground. The geometry
+/// is the PNG's, sampled at 512, which is why the view box is not 256.
+///
+/// Draw order is the PNG's stacking, back to front: the bottom-left outline,
+/// the two grey fills, the top-right outline, the orange square, the cap.
+#[component]
+pub fn IconMark(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 512 512",
+            rect { class: "mark-line", x: "80", y: "304", width: "148", height: "148", rx: "24" }
+            rect { class: "mark-fill", x: "164", y: "282", width: "100", height: "100", rx: "20" }
+            rect { class: "mark-fill-light", x: "190", y: "180", width: "132", height: "132", rx: "28" }
+            rect { class: "mark-line-thin", x: "295", y: "93", width: "110", height: "108", rx: "22" }
+            rect { class: "mark-orange", x: "292", y: "180", width: "50", height: "50", rx: "10" }
+            rect { class: "mark-cap", x: "357", y: "46", width: "66", height: "68", rx: "14" }
+        }
+    }
+}
+
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
 /// Nav entry for the Run page.
@@ -147,6 +181,31 @@ pub fn IconFolderOpen(props: IconProps) -> Element {
 
 // ─── Window controls ─────────────────────────────────────────────────────────
 
+/// The drop target's glyph: an arrow into a tray.
+///
+/// Stroked rather than filled, so it can be drawn from two short paths; the
+/// 16-unit stroke with round caps and joins is what makes it sit with the
+/// Phosphor glyphs around it, which are built on the same weight.
+#[component]
+pub fn IconTrayArrowDown(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 256 256",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "16",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M40,144V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V144" }
+            path { d: "M128,32V152M88,112l40,40,40-40" }
+        }
+    }
+}
+
 /// Minimise.
 #[component]
 pub fn IconMinus(props: IconProps) -> Element {
@@ -178,6 +237,77 @@ pub fn IconX(props: IconProps) -> Element {
             fill: "currentColor",
             path {
                 d: "M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"
+            }
+        }
+    }
+}
+
+/// Move a script turn earlier.
+#[component]
+pub fn IconCaretUp(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 256 256",
+            fill: "currentColor",
+            path { d: "M128,80 L176,160 L80,160 Z" }
+        }
+    }
+}
+
+/// Move a script turn later.
+#[component]
+pub fn IconCaretDown(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 256 256",
+            fill: "currentColor",
+            path { d: "M128,176 L80,96 L176,96 Z" }
+        }
+    }
+}
+
+/// Send an episode to Spotify. Phosphor's "Spotify Logo" brand glyph, used
+/// to indicate interoperability on a "send to Spotify" action rather than
+/// any endorsement — the same convention as any app's "Share to X" button
+/// carrying X's mark.
+#[component]
+pub fn IconSpotify(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 256 256",
+            fill: "currentColor",
+            path {
+                d: "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm31.07-46.26a8,8,0,0,1-10.81,3.33,42.79,42.79,0,0,0-40.52,0,8,8,0,0,1-7.48-14.14,59.33,59.33,0,0,1,55.48,0A8,8,0,0,1,159.07,169.74Zm32-56a8,8,0,0,1-10.83,3.29,110.62,110.62,0,0,0-104.46,0,8,8,0,0,1-7.54-14.12,126.67,126.67,0,0,1,119.54,0A8,8,0,0,1,191.06,113.76Zm-16,28a8,8,0,0,1-10.82,3.3,77,77,0,0,0-72.48,0,8,8,0,0,1-7.52-14.12,93,93,0,0,1,87.52,0A8,8,0,0,1,175.06,141.76Z"
+            }
+        }
+    }
+}
+
+/// Open a saved script file in its default external app.
+#[component]
+pub fn IconFileText(props: IconProps) -> Element {
+    let size = props.size.to_string();
+    rsx! {
+        svg {
+            class: "{props.class}",
+            width: "{size}",
+            height: "{size}",
+            view_box: "0 0 256 256",
+            fill: "currentColor",
+            path {
+                d: "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216ZM168,144a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,144Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,176Z"
             }
         }
     }

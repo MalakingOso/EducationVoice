@@ -10,8 +10,9 @@ use dioxus::prelude::*;
 use crate::paths::episode_stem;
 use crate::runner::RunKind;
 use crate::ui::app::{AppState, Page, RunRequest};
-use crate::ui::components::{script_stats, Card, ScriptEditor};
+use crate::ui::components::{script_stats, Card};
 use crate::ui::icons::IconWaveform;
+use crate::ui::script_editor::ScriptEditor;
 use crate::ui::status_log::LogLevel;
 
 #[component]
@@ -44,6 +45,7 @@ pub fn ScriptPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
                     ScriptEditor {
                         value: draft.clone(),
                         error: error.clone(),
+                        hosts: cfg.run.hosts,
                         oninput: move |v: String| state.draft.set(v),
                     }
                     if !hosts_ok {

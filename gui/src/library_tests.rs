@@ -42,6 +42,8 @@ fn meta_fixture(source: &str) -> RunMeta {
         finished: Some(chrono::Local::now()),
         elapsed_secs: Some(612),
         outcome: "completed".into(),
+        spotify_episode_uri: None,
+        spotify_status: None,
     }
 }
 
@@ -507,4 +509,21 @@ fn a_first_run_has_nothing_to_carry_and_is_left_exactly_as_it_is() {
     let mut fresh = meta_fixture("https://x/rotbigs");
     fresh.title = None;
     assert_eq!(fresh.clone().carrying_forward(None), fresh);
+}
+
+#[test]
+fn re_voicing_an_already_sent_episode_does_not_unpublish_it() {
+    // A re-voice writes a brand-new sidecar with no Spotify fields of its
+    // own; without carrying them forward the episode would look unsent the
+    // moment its script was regenerated, even though the old audio is still
+    // live on Spotify.
+    let mut previous = meta_fixture("https://x/rotbigs");
+    previous.spotify_episode_uri = Some("spotify:episode:abc123".into());
+    previous.spotify_status = Some("ready".into());
+
+    let fresh = meta_fixture("https://x/rotbigs");
+    let merged = fresh.carrying_forward(Some(&previous));
+
+    assert_eq!(merged.spotify_episode_uri.as_deref(), Some("spotify:episode:abc123"));
+    assert_eq!(merged.spotify_status.as_deref(), Some("ready"));
 }

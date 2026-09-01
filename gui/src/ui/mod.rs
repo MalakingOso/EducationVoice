@@ -6,6 +6,7 @@ pub mod library_page;
 pub mod run_page;
 pub mod run_state;
 pub mod run_strip;
+pub mod script_editor;
 pub mod script_page;
 pub mod settings_page;
 pub mod status_log;

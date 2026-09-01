@@ -13,4 +13,5 @@ pub mod paths;
 pub mod proto;
 pub mod roster;
 pub mod runner;
+pub mod spotify;
 pub mod ui;

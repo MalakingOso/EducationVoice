@@ -36,6 +36,25 @@ pub struct ScriptStats {
     pub speakers: usize,
 }
 
+/// Parse one line as a `Speaker N: <text>` turn header.
+///
+/// Mirrors `validate_script`'s notion of a turn — a line beginning
+/// `Speaker N:` — so nothing built on top of this can disagree with the
+/// pipeline about what counts as a turn. Shared between `script_stats`'s
+/// counting and the structured editor's parser (`script_editor.rs`), so
+/// those two can never disagree with *each other* either.
+///
+/// Tolerates surrounding whitespace on the line and around the digits;
+/// trims exactly one leading space off the body, so `render_blocks`'s
+/// `"Speaker {n}: {text}"` round-trips through this unchanged.
+pub fn parse_turn_line(line: &str) -> Option<(u32, &str)> {
+    let line = line.trim();
+    let rest = line.strip_prefix("Speaker ")?;
+    let (digits, body) = rest.split_once(':')?;
+    let id = digits.trim().parse::<u32>().ok()?;
+    Some((id, body.strip_prefix(' ').unwrap_or(body)))
+}
+
 /// Count turns, words and distinct speakers in a script.
 ///
 /// Mirrors `validate_script`'s notion of a turn — a line beginning `Speaker N:`
@@ -48,14 +67,7 @@ pub fn script_stats(script: &str) -> ScriptStats {
     let mut ids: Vec<u32> = Vec::new();
 
     for line in script.lines() {
-        let line = line.trim();
-        let Some(rest) = line.strip_prefix("Speaker ") else {
-            continue;
-        };
-        let Some((digits, body)) = rest.split_once(':') else {
-            continue;
-        };
-        let Ok(id) = digits.trim().parse::<u32>() else {
+        let Some((id, body)) = parse_turn_line(line) else {
             continue;
         };
         turns += 1;
@@ -190,38 +202,6 @@ pub fn StageChip(props: StageChipProps) -> Element {
         div { class: "stage-chip",
             div { class: "stage-dot {props.state.dot_class()}" }
             span { class: "run-strip-stage", "{props.stage.label()}" }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-pub struct ScriptEditorProps {
-    value: String,
-    /// A validation failure from the pipeline, shown inline rather than in a
-    /// dialog so the text it refers to stays on screen.
-    error: Option<String>,
-    oninput: EventHandler<String>,
-}
-
-#[component]
-pub fn ScriptEditor(props: ScriptEditorProps) -> Element {
-    let stats = script_stats(&props.value);
-    rsx! {
-        div { class: "script-editor",
-            textarea {
-                class: "input input-mono",
-                spellcheck: false,
-                value: "{props.value}",
-                oninput: move |e: Event<FormData>| props.oninput.call(e.value().to_string()),
-            }
-            div { class: "script-meta",
-                span { "{stats.turns} turns" }
-                span { "{stats.words} words" }
-                span { "{stats.speakers} speakers" }
-            }
-            if let Some(err) = &props.error {
-                div { class: "script-error", "{err}" }
-            }
         }
     }
 }

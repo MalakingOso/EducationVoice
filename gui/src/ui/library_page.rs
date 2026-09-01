@@ -5,13 +5,19 @@
 //! is Beamer's `grouped_by_day` convention, computed in `library.rs` and
 //! memoised here so it is not redone on every keystroke.
 
+use std::path::{Path, PathBuf};
+
 use dioxus::prelude::*;
 
+use crate::config::{save_config, Config};
 use crate::library::{self, Episode};
+use crate::spotify::{self, Readiness};
 use crate::ui::app::{AppState, Page};
 use crate::ui::app_setup::rescan_library;
 use crate::ui::components::Card;
-use crate::ui::icons::{IconArrowClockwise, IconFolderOpen, IconPlay, IconTrash};
+use crate::ui::icons::{
+    IconArrowClockwise, IconFileText, IconFolderOpen, IconPlay, IconSpotify, IconTrash,
+};
 use crate::ui::open_external;
 use crate::ui::status_log::LogLevel;
 
@@ -93,6 +99,9 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
     let stem = ep.stem.clone();
     let is_armed = armed.read().as_deref() == Some(stem.as_str());
     let is_editing = editing.read().as_deref() == Some(stem.as_str());
+    // App-wide, not per-row: v1 sends one episode at a time, so every card's
+    // button is gated on whether *any* send is in flight.
+    let sending = state.spotify_send.read().is_some();
 
     let mut draft = use_signal(|| ep.title());
 
@@ -115,7 +124,7 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
     };
 
     rsx! {
-        div { class: "library-row",
+        div { class: "library-card",
             if is_editing {
                 input {
                     class: "input library-rename",
@@ -139,7 +148,7 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
                 }
             } else {
                 div {
-                    class: "library-row-title",
+                    class: "library-card-title",
                     title: "Click to rename",
                     onclick: {
                         let stem = stem.clone();
@@ -151,14 +160,46 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
                     "{props.episode.title()}"
                 }
             }
-            div { class: "library-row-meta", "{meta_line}" }
-            div { class: "library-row-actions",
+            div { class: "library-card-meta", "{meta_line}" }
+            div { class: "library-card-actions",
                 if let Some(audio) = props.episode.audio.clone() {
                     button {
                         class: "btn-icon",
                         title: "Play",
                         onclick: move |_| open_external(&audio.to_string_lossy()),
                         IconPlay { size: 16 }
+                    }
+                }
+                if let Some(audio) = props.episode.audio.clone() {
+                    button {
+                        class: "btn-icon",
+                        title: spotify_button_title(&props.episode, sending),
+                        disabled: sending,
+                        onclick: {
+                            let stem = stem.clone();
+                            let title = props.episode.title();
+                            move |_| send_to_spotify(state, stem.clone(), audio.clone(), title.clone())
+                        },
+                        IconSpotify { size: 16 }
+                    }
+                }
+                if let Some(script) = props.episode.script.clone() {
+                    button {
+                        class: "btn-icon",
+                        title: "View this script",
+                        onclick: move |_| {
+                            match std::fs::read_to_string(&script) {
+                                Ok(text) => {
+                                    state.draft.set(text);
+                                    state.page.set(Page::Script);
+                                }
+                                Err(e) => state.log.write().push(
+                                    LogLevel::Error,
+                                    format!("could not read {}: {e}", script.display()),
+                                ),
+                            }
+                        },
+                        IconFileText { size: 16 }
                     }
                 }
                 if let Some(script) = props.episode.script.clone() {
@@ -225,6 +266,139 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
             }
         }
     }
+}
+
+/// What the Spotify button's tooltip says, given what the sidecar last
+/// recorded about it.
+fn spotify_button_title(ep: &Episode, sending: bool) -> String {
+    if sending {
+        return "A send is already in progress".to_string();
+    }
+    match ep.meta.as_ref().and_then(|m| m.spotify_status.as_deref()) {
+        Some("ready") => "Sent to Spotify — send again".to_string(),
+        Some(status) => format!("Spotify: {status}"),
+        None => "Send to Spotify".to_string(),
+    }
+}
+
+/// Kick off a send. `state.spotify_send` is set here, synchronously, so the
+/// button disables on the same click that starts the task — a second click
+/// before the task's first `.await` cannot slip through.
+fn send_to_spotify(mut state: AppState, stem: String, audio: PathBuf, title: String) {
+    state.spotify_send.set(Some(stem.clone()));
+    spawn(async move {
+        run_spotify_send(state, &stem, &audio, &title).await;
+        // Every exit path — success, a CLI error, a timeout — funnels through
+        // here, so the guard can never be left set by a forgotten branch.
+        state.spotify_send.set(None);
+    });
+}
+
+/// Cover image, show, upload, then poll to a terminal readiness — logging
+/// and writing the sidecar at each transition.
+async fn run_spotify_send(mut state: AppState, stem: &str, audio: &Path, title: &str) {
+    let Some(paths) = state.paths.peek().clone() else { return };
+    let meta_path = library::meta_path(&paths, stem);
+    let cover = Config::config_dir().join("spotify-cover.jpg");
+
+    if let Err(e) = spotify::ensure_cover_image(&cover) {
+        state
+            .log
+            .write()
+            .push(LogLevel::Error, format!("spotify: could not write the cover image: {e}"));
+        return;
+    }
+
+    write_spotify_status(state, &meta_path, "uploading");
+
+    let cached = state.config.peek().spotify.show_uri.clone();
+    let show_uri = match spotify::ensure_show(cached.as_deref(), &cover).await {
+        Ok(uri) => uri,
+        Err(e) => {
+            state.log.write().push(LogLevel::Error, format!("spotify: {e}"));
+            write_spotify_status(state, &meta_path, "failed");
+            return;
+        }
+    };
+    if cached.as_deref() != Some(show_uri.as_str()) {
+        let uri = show_uri.clone();
+        save_config(&mut state.config, |c| c.spotify.show_uri = Some(uri));
+    }
+
+    state.log.write().push(LogLevel::Info, format!("spotify: uploading \"{title}\""));
+    let uploaded = match spotify::upload(audio, title, &show_uri, &cover).await {
+        Ok(u) => u,
+        Err(e) => {
+            state.log.write().push(LogLevel::Error, format!("spotify: {e}"));
+            write_spotify_status(state, &meta_path, "failed");
+            return;
+        }
+    };
+
+    let episode_id = uploaded.episode_uri;
+    state
+        .log
+        .write()
+        .push(LogLevel::Info, format!("spotify: uploaded as {episode_id}, waiting for it to process"));
+    write_spotify_episode(state, &meta_path, &episode_id, "processing");
+
+    let deadline = tokio::time::Instant::now() + spotify::POLL_TIMEOUT;
+    loop {
+        match spotify::poll_status(&episode_id).await {
+            Ok(status) => {
+                write_spotify_episode(state, &meta_path, &episode_id, status.readiness.label());
+                match status.readiness {
+                    Readiness::Ready => {
+                        state.log.write().push(LogLevel::Info, "spotify: episode is ready".to_string());
+                        return;
+                    }
+                    Readiness::Failed => {
+                        state.log.write().push(LogLevel::Error, "spotify: processing failed".to_string());
+                        return;
+                    }
+                    Readiness::Processing => {}
+                }
+            }
+            Err(e) => {
+                state.log.write().push(LogLevel::Error, format!("spotify: {e}"));
+                write_spotify_episode(state, &meta_path, &episode_id, "failed");
+                return;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            state.log.write().push(
+                LogLevel::Warn,
+                "spotify: gave up waiting for the episode to become ready".to_string(),
+            );
+            write_spotify_episode(state, &meta_path, &episode_id, "timed out");
+            return;
+        }
+        tokio::time::sleep(spotify::POLL_INTERVAL).await;
+    }
+}
+
+/// Re-read the sidecar, set its Spotify status, write it back, rescan.
+///
+/// Read fresh each time rather than threading one `RunMeta` through the whole
+/// send: an upload can take minutes, long enough for the title to be edited
+/// mid-send, and a stale write would clobber that rename.
+fn write_spotify_status(state: AppState, meta_path: &Path, status: &str) {
+    let mut meta = library::read_meta(meta_path).unwrap_or_default();
+    meta.spotify_status = Some(status.to_string());
+    if let Err(e) = library::write_meta(meta_path, &meta) {
+        tracing::warn!(error = %e, "could not write the spotify status to the sidecar");
+    }
+    rescan_library(state);
+}
+
+fn write_spotify_episode(state: AppState, meta_path: &Path, episode_uri: &str, status: &str) {
+    let mut meta = library::read_meta(meta_path).unwrap_or_default();
+    meta.spotify_episode_uri = Some(episode_uri.to_string());
+    meta.spotify_status = Some(status.to_string());
+    if let Err(e) = library::write_meta(meta_path, &meta) {
+        tracing::warn!(error = %e, "could not write the spotify status to the sidecar");
+    }
+    rescan_library(state);
 }
 
 /// The dot-separated line under the title: only what was actually recorded.

@@ -21,6 +21,8 @@ pub struct Config {
     pub voices: VoiceSettings,
     #[serde(default)]
     pub device: DeviceSettings,
+    #[serde(default)]
+    pub spotify: SpotifySettings,
 }
 
 /// What the next run asks of `article2pod.py`.
@@ -59,6 +61,17 @@ pub struct DeviceSettings {
     pub gpu_mask: String,
 }
 
+/// The Spotify "Send" button's state. There is only one show in this
+/// version, so a cached URI is all there is to remember.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpotifySettings {
+    /// The `article2pod` show, once created. `None` until the first send —
+    /// `spotify::ensure_show` looks it up by title and fills this in rather
+    /// than creating a second show on every launch.
+    #[serde(default)]
+    pub show_uri: Option<String>,
+}
+
 /// The host counts `article2pod.py --hosts` accepts.
 const HOST_CHOICES: [u8; 3] = [2, 3, 4];
 
@@ -70,6 +83,7 @@ impl Default for Config {
             run: RunSettings::default(),
             voices: VoiceSettings::default(),
             device: DeviceSettings::default(),
+            spotify: SpotifySettings::default(),
         }
     }
 }
@@ -92,6 +106,12 @@ impl Default for VoiceSettings {
 impl Default for DeviceSettings {
     fn default() -> Self {
         Self { gpu_mask: String::new() }
+    }
+}
+
+impl Default for SpotifySettings {
+    fn default() -> Self {
+        Self { show_uri: None }
     }
 }
 
@@ -254,6 +274,7 @@ mod tests {
         assert!(!config.run.auto_continue, "the script-review gate is on until asked otherwise");
         assert!(config.voices.selected.is_empty(), "an empty list defers to the CLI's roster");
         assert_eq!(config.device.gpu_mask, "", "an empty mask leaves ZE_AFFINITY_MASK unset");
+        assert!(config.spotify.show_uri.is_none(), "no show exists until the first send");
     }
 
     #[test]
@@ -268,6 +289,7 @@ mod tests {
                 selected: vec!["alice".into(), "carter".into(), "maya".into()],
             },
             device: DeviceSettings { gpu_mask: "1".into() },
+            spotify: SpotifySettings { show_uri: Some("spotify:show:abc123".into()) },
         };
         written.save_to(&path).expect("save");
 
@@ -276,6 +298,15 @@ mod tests {
             written,
             "every settings card must survive a quit and relaunch unchanged"
         );
+    }
+
+    #[test]
+    fn a_spotify_show_uri_written_by_hand_loads() {
+        let path = temp_dir("spotify").join("config.toml");
+        std::fs::write(&path, "[spotify]\nshow_uri = \"spotify:show:abc123\"\n").expect("write");
+
+        let config = load_from(&path).expect("load");
+        assert_eq!(config.spotify.show_uri.as_deref(), Some("spotify:show:abc123"));
     }
 
     #[test]

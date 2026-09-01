@@ -69,6 +69,12 @@ pub struct RunMeta {
     /// "completed" | "cancelled" | "failed". A string rather than the runner's
     /// enum so an old sidecar written by a future version still deserializes.
     pub outcome: String,
+    /// Set once `spotify::upload` returns. Absent means never sent.
+    pub spotify_episode_uri: Option<String>,
+    /// "uploading" | "processing" | "ready" | "failed", written at each
+    /// transition of a send so the row reflects where it actually got to,
+    /// not just whether one was ever attempted.
+    pub spotify_status: Option<String>,
 }
 
 impl RunMeta {
@@ -94,6 +100,15 @@ impl RunMeta {
         // at all, so an empty one here means "unknown", not "none".
         if self.source.trim().is_empty() {
             self.source = previous.source.clone();
+        }
+        // A re-voice carries no Spotify state of its own — without this, the
+        // new sidecar this run writes would silently "unpublish" an episode
+        // that was already sent.
+        if self.spotify_episode_uri.is_none() {
+            self.spotify_episode_uri = previous.spotify_episode_uri.clone();
+        }
+        if self.spotify_status.is_none() {
+            self.spotify_status = previous.spotify_status.clone();
         }
         self
     }

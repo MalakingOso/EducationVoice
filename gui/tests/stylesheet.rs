@@ -16,6 +16,7 @@ const MARKUP: &[(&str, &str)] = &[
     ("run_strip.rs", include_str!("../src/ui/run_strip.rs")),
     ("run_page.rs", include_str!("../src/ui/run_page.rs")),
     ("script_page.rs", include_str!("../src/ui/script_page.rs")),
+    ("script_editor.rs", include_str!("../src/ui/script_editor.rs")),
     ("library_page.rs", include_str!("../src/ui/library_page.rs")),
     ("settings_page.rs", include_str!("../src/ui/settings_page.rs")),
 ];

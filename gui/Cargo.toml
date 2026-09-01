@@ -22,6 +22,15 @@ path = "src/bin/run_smoke.rs"
 name = "drop_smoke"
 path = "src/bin/drop_smoke.rs"
 
+# Proves two brittle paths through the same WebKitGTK backend before the
+# script editor is built on top of them: HTML5 draggable reorder events, and
+# document::eval reading a DOM property (selectionStart/selectionEnd), used
+# nowhere else in this codebase. Kept rather than deleted, for the same
+# reason as drop_smoke.
+[[bin]]
+name = "reorder_smoke"
+path = "src/bin/reorder_smoke.rs"
+
 [dependencies]
 dioxus = { version = "0.7", features = ["desktop"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }

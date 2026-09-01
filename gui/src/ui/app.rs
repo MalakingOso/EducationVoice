@@ -67,6 +67,10 @@ pub struct AppState {
     pub pgid: Signal<Option<i32>>,
     /// Bumped on a timer so the elapsed clock re-renders while a run is live.
     pub tick: Signal<u64>,
+    /// The stem currently being sent to Spotify, if any. One in-flight send
+    /// at a time, app-wide — gates every card's Send button, not just the
+    /// row that started it.
+    pub spotify_send: Signal<Option<String>>,
 }
 
 #[component]
@@ -86,6 +90,7 @@ pub fn App() -> Element {
         source: use_signal(String::new),
         pgid: use_signal(|| None),
         tick: use_signal(|| 0),
+        spotify_send: use_signal(|| None),
     };
 
     // Fixed order, as in Beamer: paths first because everything else needs
@@ -117,7 +122,7 @@ pub fn App() -> Element {
             div { class: "app-body",
                 div { class: "left-column",
                     div { class: "corner-badge",
-                        img { class: "corner-badge-icon", src: asset!("assets/icon.png"), alt: "article2pod" }
+                        img { class: "corner-badge-icon", src: asset!("assets/icon-badge.png"), alt: "article2pod" }
                     }
                     nav { class: "sidebar",
                         div { class: "sidebar-top",
@@ -324,6 +329,10 @@ fn finish_run(
             RunOutcome::Failed { .. } => "failed",
         }
         .to_string(),
+        // Neither is this run's to say; `carrying_forward` pulls them from
+        // the previous sidecar when present.
+        spotify_episode_uri: None,
+        spotify_status: None,
     }
     .carrying_forward(previous.as_ref());
 
