@@ -3,6 +3,11 @@
 //! Everything that is set once — hosts, voices, the device, the log — lives in
 //! Settings. What is left here is the one thing that changes per run: the
 //! source, whether to stop at the script, and the button.
+//!
+//! It is laid out as a launcher: the mark and the name, the drop zone, and
+//! one action row, centred as a group. Everything a drop can say — the
+//! prompt, a refusal, the chosen file — is said inside the zone, so the row
+//! under it never moves.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +19,7 @@ use crate::paths::episode_stem;
 use crate::runner::RunKind;
 use crate::ui::app::{AppState, RunRequest};
 use crate::ui::components::Toggle;
+use crate::ui::icons::{IconMark, IconTrayArrowDown, IconX};
 use crate::ui::status_log::LogLevel;
 
 /// What the pipeline can read from a local file.
@@ -95,7 +101,7 @@ pub fn accept_source(raw: &str) -> Result<Source, String> {
     Ok(Source::File(path))
 }
 
-/// How a chosen source shows in the zone: a short label for the chip, and the
+/// How a chosen source shows in the zone: a short name to set large, and the
 /// full thing under it.
 ///
 /// A link gets the same treatment a file does. Without it a dragged-in link
@@ -149,108 +155,138 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
     let chosen = chip_for(source.trim());
     let can_run = !running && !source.trim().is_empty();
 
+    let refused = refusal.read().is_some();
+    let zone_class = match (*hovering.read(), chosen.is_some(), refused) {
+        (true, _, _) => "dropzone dropzone-active",
+        (false, true, _) => "dropzone dropzone-filled",
+        (false, false, true) => "dropzone dropzone-refused",
+        (false, false, false) => "dropzone",
+    };
+
     rsx! {
         div { class: "content",
-            div {
-                class: if *hovering.read() { "dropzone dropzone-active" } else { "dropzone" },
-                // Without a prevent_default on dragover the browser refuses
-                // the drop outright and ondrop never fires at all.
-                ondragover: move |e| e.prevent_default(),
-                ondragenter: move |_| hovering.set(true),
-                // wry never clears its own hovered-path list on leave, so a
-                // file drag followed by a text drag can present a stale path.
-                // Clearing here is half of what covers that; checking
-                // data_transfer below is the other half.
-                ondragleave: move |_| hovering.set(false),
-                ondrop: move |e: Event<DragData>| {
-                    e.prevent_default();
-                    hovering.set(false);
-                    if let Some(file) = e.files().into_iter().next() {
-                        take_file(file.path());
-                        return;
-                    }
-                    // No files means a drag out of a browser rather than a
-                    // file manager. Directly useful here: this app's source
-                    // may legitimately be a URL.
-                    let transfer = e.data_transfer();
-                    let text = transfer
-                        .get_data("text/uri-list")
-                        .or_else(|| transfer.get_data("text/plain"))
-                        .unwrap_or_default();
-                    let dropped = text.lines().find(|l| l.starts_with("http")).unwrap_or("");
-                    if !dropped.is_empty() {
-                        refusal.set(None);
-                        state.source.set(dropped.to_string());
-                    }
-                },
+            div { class: "launcher",
+                div { class: "launcher-head",
+                    IconMark { size: 72, class: "launcher-mark" }
+                    div { class: "launcher-title", "article2pod" }
+                    div { class: "launcher-tagline", "Turn an article into a podcast episode." }
+                }
 
-                if let Some((label, detail)) = chosen.clone() {
-                    div { class: "dropzone-chosen",
-                        div { class: "tag-chip",
-                            span { "{label}" }
-                            button {
-                                class: "tag-remove",
-                                onclick: move |_| {
-                                    refusal.set(None);
-                                    state.source.set(String::new());
-                                },
-                                "\u{2715}"
+                div {
+                    class: "{zone_class}",
+                    // Without a prevent_default on dragover the browser refuses
+                    // the drop outright and ondrop never fires at all.
+                    ondragover: move |e| e.prevent_default(),
+                    ondragenter: move |_| hovering.set(true),
+                    // wry never clears its own hovered-path list on leave, so a
+                    // file drag followed by a text drag can present a stale path.
+                    // Clearing here is half of what covers that; checking
+                    // data_transfer below is the other half.
+                    ondragleave: move |_| hovering.set(false),
+                    ondrop: move |e: Event<DragData>| {
+                        e.prevent_default();
+                        hovering.set(false);
+                        if let Some(file) = e.files().into_iter().next() {
+                            take_file(file.path());
+                            return;
+                        }
+                        // No files means a drag out of a browser rather than a
+                        // file manager. Directly useful here: this app's source
+                        // may legitimately be a URL.
+                        let transfer = e.data_transfer();
+                        let text = transfer
+                            .get_data("text/uri-list")
+                            .or_else(|| transfer.get_data("text/plain"))
+                            .unwrap_or_default();
+                        let dropped = text.lines().find(|l| l.starts_with("http")).unwrap_or("");
+                        if !dropped.is_empty() {
+                            refusal.set(None);
+                            state.source.set(dropped.to_string());
+                        }
+                    },
+
+                    if let Some((label, detail)) = chosen.clone() {
+                        div { class: "dropzone-chosen",
+                            div { class: "dropzone-name-row",
+                                div { class: "dropzone-name", "{label}" }
+                                button {
+                                    class: "dropzone-clear",
+                                    title: "Choose something else",
+                                    onclick: move |_| {
+                                        refusal.set(None);
+                                        state.source.set(String::new());
+                                    },
+                                    IconX { size: 14 }
+                                }
+                            }
+                            div { class: "dropzone-path", "{detail}" }
+                            // A refusal can land on a filled zone too: a bad
+                            // second drop, or Start finding the file gone.
+                            // Said here, under the path, so it is still
+                            // inside the zone.
+                            if let Some(why) = refusal.read().clone() {
+                                div { class: "dropzone-refusal", "{why}" }
                             }
                         }
-                        div { class: "dropzone-path", "{detail}" }
-                    }
-                } else {
-                    div { class: "dropzone-hint", "Drop a PDF, a text file or a link here" }
-                    div { class: "dropzone-browse",
-                        span { class: "dropzone-or", "or" }
-                        // dioxus-desktop intercepts a click on a file input and
-                        // routes it through its own native dialog, which comes
-                        // back with a real path. No dependency, no plumbing.
-                        label { class: "btn",
-                            "Browse\u{2026}"
-                            input {
-                                r#type: "file",
-                                class: "file-input-hidden",
-                                accept: ".pdf,.txt,.md",
-                                onchange: move |e: Event<FormData>| {
-                                    if let Some(f) = e.files().into_iter().next() {
-                                        take_file(f.path());
-                                    }
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(why) = refusal.read().clone() {
-                div { class: "source-error", "{why}" }
-            }
-
-            div { class: "run-toggle",
-                div { class: "card-row",
-                    span { class: "card-label", "Skip the script review" }
-                    Toggle {
-                        value: cfg.run.auto_continue,
-                        ontoggle: move |v: bool| {
-                            save_config(&mut state.config, |c| c.run.auto_continue = v);
-                        },
-                    }
-                }
-                div { class: "card-label-hint",
-                    if cfg.run.auto_continue {
-                        "One process, straight through to audio."
                     } else {
-                        "Stops after the script so it can be edited."
+                        IconTrayArrowDown { size: 40, class: "dropzone-glyph" }
+                        // The refusal takes the prompt's place rather than a
+                        // box of its own beneath, so the action row holds
+                        // still whether or not something was refused.
+                        if let Some(why) = refusal.read().clone() {
+                            div { class: "dropzone-refusal", "{why}" }
+                        } else {
+                            div { class: "dropzone-hint", "Drop a PDF, a text file or a link here" }
+                        }
+                        div { class: "dropzone-browse",
+                            span { class: "dropzone-or", "or" }
+                            // dioxus-desktop intercepts a click on a file input and
+                            // routes it through its own native dialog, which comes
+                            // back with a real path. No dependency, no plumbing.
+                            label { class: "btn",
+                                "Browse\u{2026}"
+                                input {
+                                    r#type: "file",
+                                    class: "file-input-hidden",
+                                    accept: ".pdf,.txt,.md",
+                                    onchange: move |e: Event<FormData>| {
+                                        if let Some(f) = e.files().into_iter().next() {
+                                            take_file(f.path());
+                                        }
+                                    },
+                                }
+                            }
+                        }
                     }
                 }
-            }
 
-            button {
-                class: "btn btn-primary run-start",
-                disabled: !can_run,
-                onclick: move |_| start_run(state, runner, refusal),
-                if cfg.run.auto_continue { "Make the episode" } else { "Write the script" }
+                div { class: "run-actions",
+                    div { class: "run-toggle",
+                        div { class: "card-row",
+                            span { class: "card-label", "Skip the script review" }
+                            Toggle {
+                                value: cfg.run.auto_continue,
+                                ontoggle: move |v: bool| {
+                                    save_config(&mut state.config, |c| c.run.auto_continue = v);
+                                },
+                            }
+                        }
+                        div { class: "card-label-hint",
+                            if cfg.run.auto_continue {
+                                "One process, straight through to audio."
+                            } else {
+                                "Stops after the script so it can be edited."
+                            }
+                        }
+                    }
+
+                    button {
+                        class: "btn btn-primary run-start",
+                        disabled: !can_run,
+                        onclick: move |_| start_run(state, runner, refusal),
+                        if cfg.run.auto_continue { "Make the episode" } else { "Write the script" }
+                    }
+                }
             }
         }
     }
