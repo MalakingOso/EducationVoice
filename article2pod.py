@@ -1,6 +1,7 @@
 """Article-to-Podcast: Convert articles into multi-host podcast audio."""
 
 import argparse
+import html
 import json
 import os
 import re
@@ -259,6 +260,13 @@ def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | N
                 disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
                 permission_mode="bypassPermissions",
                 max_buffer_size=SDK_MAX_BUFFER_BYTES,
+                # Left unset, the SDK omits --setting-sources and the `claude`
+                # child falls back to its own default of loading every
+                # settings.json (user, project, local) — MCP servers and all.
+                # On a machine with a dozen MCP plugins configured globally,
+                # that turned a one-turn Haiku call into a 50-second one, all
+                # spent starting servers this call allows no tools to reach.
+                setting_sources=[],
             ),
         ):
             if isinstance(message, AssistantMessage):
@@ -278,6 +286,167 @@ def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | N
     if answer.strip().upper() == "UNKNOWN":
         return None
     return clean_title(answer)
+
+
+# ---------------------------------------------------------------------------
+# Episode descriptions
+# ---------------------------------------------------------------------------
+
+# The model that writes the Spotify show-notes blurb.  Same call shape and
+# same reasoning as TITLE_MODEL: summarising a script that is already written
+# is not a reasoning problem, and this one runs while the user waits on an
+# upload, so it is the latency that matters rather than the depth.
+DESCRIPTION_MODEL = "claude-haiku-4-5-20251001"
+
+# Roughly what Spotify shows before it collapses the rest behind "more".  A
+# blurb that has to be expanded has already lost the person it was written
+# for, so paragraphs past this point are dropped rather than shown.
+MAX_DESCRIPTION_CHARS = 1200
+
+# How much of the script the model is shown.  The longest this app has
+# produced is ~36 kB, so in practice this truncates nothing — it exists so a
+# pathological script cannot turn a cheap call into an expensive one.
+DESCRIPTION_EXCERPT_CHARS = 80_000
+
+# No tools, and the whole script arrives in the prompt, so the answer is one
+# assistant turn.  Two for the same headroom TEXT_TITLE_TURNS carries.
+DESCRIPTION_TURNS = 2
+
+# Asks for plain paragraphs, not HTML.  The show-notes panel wants a single
+# line of <p> blocks with no <br> and no literal newlines, and a model asked
+# for HTML returns markdown fences, stray tags and the occasional invented
+# <a href>.  Getting prose and assembling the markup in clean_description
+# makes the format hold by construction.
+DESCRIPTION_PROMPT = """\
+Below is the full script of a podcast episode. Write the show-notes blurb \
+that sits under it on Spotify.
+
+Two or three short paragraphs, separated by a blank line. Open with the most \
+interesting thing the episode actually lands on: the first sentence is all \
+most people ever see, so do not spend it on "in this episode" \
+throat-clearing. Then say what ground the conversation covers.
+
+Write it for someone deciding whether to press play, in the register of a \
+person describing something they found interesting. No marketing voice, no \
+rhetorical questions, no "dive into" or "explore". Do not use em dashes.
+
+Describe only what is in the script. Do not add links, URLs, citations, \
+timestamps, hashtags or a sign-off, and do not name the hosts. Reply with the \
+blurb and nothing else: no preamble, no heading, no quotes, no markdown, no \
+HTML. If the script is too garbled to describe, reply with the single word \
+UNKNOWN.
+
+The episode is titled: {title}
+
+---
+
+{script}
+"""
+
+_CODE_FENCE = re.compile(r"^```[a-z]*\n|\n```$", re.I)
+_HTML_TAG = re.compile(r"<[^>]*>")
+_DESCRIPTION_LABEL = re.compile(
+    r"^(?:episode\s+)?(?:description|blurb|show ?notes)\s*:\s*", re.I
+)
+
+
+def clean_description(raw: str | None) -> str | None:
+    """Turn a model's answer into the one line of HTML Spotify wants.
+
+    Everything reaching here is untrusted in the same way `clean_title`'s
+    input is, with a sharper consequence: episode metadata is immutable once
+    uploaded, so a bad description cannot be edited afterwards — only deleted
+    and re-uploaded.  That is the whole argument for refusing a doubtful
+    answer instead of sending it.
+
+    The output contract comes from the save-to-spotify skill's
+    episode-description reference: one line, every paragraph in its own
+    <p>...</p>, no <br> (it renders as literal text on the desktop app), and
+    hyphens rather than em dashes.
+    """
+    if not raw:
+        return None
+
+    text = _CODE_FENCE.sub("", raw.strip()).strip()
+    text = _DESCRIPTION_LABEL.sub("", text)
+
+    if not text or text.strip().upper() == "UNKNOWN":
+        return None
+    if _SPEAKER_LINE.search(text):
+        # The script leaking into the blurb slot, the same trade clean_title
+        # refuses in the other direction.
+        return None
+
+    kept: list[str] = []
+    total = 0
+    for para in re.split(r"\n\s*\n", text):
+        # Tags first, then escape: a stray "<" in the prose survives as &lt;
+        # rather than being eaten as the start of a tag.
+        para = _HTML_TAG.sub("", para)
+        para = " ".join(para.split())
+        para = para.replace("—", "-").replace("–", "-")
+        if not para:
+            continue
+        wrapped = f"<p>{html.escape(para, quote=False)}</p>"
+        if total + len(wrapped) > MAX_DESCRIPTION_CHARS:
+            # Stop at a paragraph boundary.  A blurb cut mid-sentence reads
+            # worse than a shorter one, and a first paragraph that already
+            # overruns is a runaway answer rather than a description.
+            break
+        kept.append(wrapped)
+        total += len(wrapped)
+
+    return "".join(kept) if kept else None
+
+
+def fetch_description(
+    script: str, title: str, model: str = DESCRIPTION_MODEL
+) -> str | None:
+    """Ask Haiku for a Spotify blurb for `script`, or None if it cannot write one.
+
+    Never raises, for the reason fetch_title does not: this runs inside a send
+    the user is watching, and an episode that arrives without a description is
+    a much better outcome than a send that dies before the upload.
+    """
+    prompt = DESCRIPTION_PROMPT.format(
+        title=title or "Untitled",
+        script=script[:DESCRIPTION_EXCERPT_CHARS],
+    )
+
+    answer = ""
+
+    async def _ask():
+        nonlocal answer
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                model=model,
+                max_turns=DESCRIPTION_TURNS,
+                allowed_tools=[],
+                disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
+                permission_mode="bypassPermissions",
+                max_buffer_size=SDK_MAX_BUFFER_BYTES,
+                # See the matching comment on fetch_title's ClaudeAgentOptions
+                # -- this is what took a Spotify send from a ~4s description
+                # call to a ~50s one.
+                setting_sources=[],
+            ),
+        ):
+            if isinstance(message, AssistantMessage):
+                parts = [
+                    block.text for block in message.content
+                    if isinstance(block, TextBlock)
+                ]
+                if parts:
+                    answer = "\n".join(parts)
+
+    try:
+        anyio.run(_ask)
+    except Exception as e:  # noqa: BLE001 — see the docstring
+        print(f"Could not write an episode description: {e}", file=sys.stderr)
+        return None
+
+    return clean_description(answer)
 
 
 # ---------------------------------------------------------------------------
@@ -1198,6 +1367,18 @@ def main():
         ),
     )
     parser.add_argument(
+        "--describe", metavar="SCRIPT",
+        help=(
+            "Write a Spotify show-notes blurb for an existing script and "
+            "print it as JSON. One cheap Claude call and nothing else — no "
+            "TTS, no run. Used by the GUI when sending an episode."
+        ),
+    )
+    parser.add_argument(
+        "--describe-title", default="",
+        help="The title --describe should describe its script under.",
+    )
+    parser.add_argument(
         "--progress-json", action="store_true",
         help=(
             "Emit machine-readable progress as JSON lines on stdout. Human "
@@ -1224,6 +1405,21 @@ def main():
         for name in sorted(PRESET_VOICES):
             print(fetch_voice(name), file=sys.stderr)
         print(f"Voice clips are in {VOICE_DIR}", file=sys.stderr)
+        return
+
+    # Answered alongside the other side-effect-free queries and before the
+    # source check, because describing a script that already exists is not a
+    # run and needs no source.  Prints JSON unconditionally, as --list-voices
+    # does: that is this flag's entire output, not progress reporting.
+    if args.describe:
+        try:
+            script_text = Path(args.describe).expanduser().read_text(encoding="utf-8")
+        except OSError as e:
+            print(json.dumps({"description": None, "error": str(e)}))
+            return
+        print(json.dumps({
+            "description": fetch_description(script_text, args.describe_title),
+        }))
         return
 
     if not args.source and not args.from_script:

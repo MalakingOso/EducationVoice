@@ -206,10 +206,11 @@ opens and renders, but no async task ever runs, so it looks healthy and does
 nothing. Set `ARTICLE2POD_KEEP_GDK_BACKEND=1` to opt out once that is fixed
 upstream.
 
-The CLI gained three flags for the GUI, all additive and all off by default:
+The CLI gained four flags for the GUI, all additive and all off by default:
 `--progress-json` (JSON-lines events on stdout, human text stays on stderr),
 `--script-out PATH` (so each run keeps its own script instead of overwriting
-`output/script.txt`), and `--list-voices` (the roster as JSON).
+`output/script.txt`), `--list-voices` (the roster as JSON), and `--describe
+SCRIPT` (a Spotify blurb for a script that already exists, as JSON).
 
 ```bash
 # Watch the event stream the GUI consumes
@@ -234,6 +235,36 @@ put the prose at risk to obtain a filename. It is gated behind the flag so a
 plain CLI run gains neither the call nor its latency, and it cannot fail a run:
 a title that does not arrive falls back to the page's `<title>`, then the
 source's last path component, then the filename stem.
+
+### Sending an episode to Spotify
+
+The Library's Spotify button uploads one episode to a show called
+`article2pod`, through the `save-to-spotify` CLI. Nothing else in the app may
+call `upload` or `shows create`; this account has other shows on it, and a
+send has to be a deliberate, user-run action.
+
+Just before the upload, Haiku writes the show-notes blurb that sits under the
+episode — a second `--describe` call, made against the finished script rather
+than the article, because the script is what the episode actually says. The
+Python side owns the prompt and the sanitising for the same reason the title
+call does: that is where the Agent SDK and its credentials already are, so the
+GUI needs no API key. The model is asked for plain paragraphs and the HTML is
+assembled in `clean_description`, which is what keeps the format Spotify wants
+(one line, `<p>` blocks, no `<br>`, no invented links) true by construction
+rather than by asking nicely.
+
+A description is a nicety: an unreadable script, a refused answer, or a wedged
+call is a log line and the upload goes ahead without one. That is a real
+tradeoff, because episode metadata is immutable once created — an episode sent
+without a description can only get one by being deleted and re-sent — and it is
+still the right way round, since the alternative is losing a finished episode
+to a blurb.
+
+Readiness is polled after the upload. The CLI documents three values, but a
+live episode also returns `NOT_READY` for its first minutes, so only `READY`
+and `FAILED` are treated as terminal and every other word means keep waiting.
+A closed set here once recorded a permanent "failed" against episodes that
+were processing perfectly well.
 
 ## Voices
 

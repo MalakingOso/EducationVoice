@@ -465,6 +465,16 @@ body {
   min-width: 80px;
 }
 
+.spotify-toggle {
+  cursor: pointer;
+}
+
+.spotify-toggle-caret {
+  display: flex;
+  align-items: center;
+  color: var(--fg-muted);
+}
+
 .card-label-hint {
   font-size: 12px;
   color: var(--fg-muted);
@@ -859,6 +869,21 @@ body {
   border-color: var(--danger);
 }
 
+/* An episode Spotify has actually finished processing, not merely sent —
+   green is reserved for that terminal state so it cannot be mistaken for
+   "upload in flight" or "upload failed". */
+.btn-icon.spotify-ready {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(22, 163, 74, 0.06);
+}
+
+.btn-icon.spotify-ready:hover {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(22, 163, 74, 0.06);
+}
+
 .btn-icon:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -871,8 +896,11 @@ body {
 
 /* ===== Status Dot ===== */
 .status-dot {
+  display: inline-block;
   width: 8px;
   height: 8px;
+  margin-right: 4px;
+  vertical-align: middle;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -889,6 +917,10 @@ body {
 .status-processing {
   background: var(--accent);
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-failed {
+  background: var(--danger);
 }
 
 @keyframes pulse {

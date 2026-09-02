@@ -404,7 +404,7 @@ fn group_is_alive(pgid: i32) -> bool {
 /// `claude` lives there, and a GUI started from a desktop launcher inherits a
 /// far thinner environment than one started from a terminal — without this the
 /// script stage dies with "claude: not found" only when launched by icon.
-fn augmented_path() -> std::ffi::OsString {
+pub(crate) fn augmented_path() -> std::ffi::OsString {
     let current = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(home) = dirs::home_dir() {

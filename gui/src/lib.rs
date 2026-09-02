@@ -8,6 +8,7 @@
 //! both binaries link removes that whole problem.
 
 pub mod config;
+pub mod describe;
 pub mod library;
 pub mod paths;
 pub mod proto;

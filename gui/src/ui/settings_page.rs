@@ -10,6 +10,7 @@ use dioxus::prelude::*;
 use crate::config::{save_config, Config};
 use crate::ui::app::AppState;
 use crate::ui::components::{Card, Select};
+use crate::ui::spotify_section::SpotifySection;
 
 /// `ZE_AFFINITY_MASK` values. Empty means "do not set it", leaving the choice
 /// to the Python side's own device detection.
@@ -117,6 +118,8 @@ pub fn SettingsPage(state: AppState) -> Element {
                     "Selecting a card sets ZE_AFFINITY_MASK for the run. The B60 has the headroom; the B570 also drives the desktop."
                 }
             }
+
+            SpotifySection { state }
 
             Card { title: "Log",
                 div { class: "status-log",

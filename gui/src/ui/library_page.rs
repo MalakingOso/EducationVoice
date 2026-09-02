@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use dioxus::prelude::*;
 
 use crate::config::{save_config, Config};
+use crate::describe;
 use crate::library::{self, Episode};
+use crate::paths::Paths;
 use crate::spotify::{self, Readiness};
 use crate::ui::app::{AppState, Page};
 use crate::ui::app_setup::rescan_library;
@@ -172,13 +174,16 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
                 }
                 if let Some(audio) = props.episode.audio.clone() {
                     button {
-                        class: "btn-icon",
+                        class: if spotify_is_ready(&props.episode) { "btn-icon spotify-ready" } else { "btn-icon" },
                         title: spotify_button_title(&props.episode, sending),
                         disabled: sending,
                         onclick: {
                             let stem = stem.clone();
                             let title = props.episode.title();
-                            move |_| send_to_spotify(state, stem.clone(), audio.clone(), title.clone())
+                            let script = props.episode.script.clone();
+                            move |_| send_to_spotify(
+                                state, stem.clone(), audio.clone(), title.clone(), script.clone(),
+                            )
                         },
                         IconSpotify { size: 16 }
                     }
@@ -268,6 +273,14 @@ fn LibraryRow(props: LibraryRowProps) -> Element {
     }
 }
 
+/// Whether the sidecar's last poll saw this episode reach `READY` on
+/// Spotify — the button turns green only for that terminal state, never for
+/// "uploading" or "processing", so green means it is actually resident there
+/// right now, not merely that a send was started.
+fn spotify_is_ready(ep: &Episode) -> bool {
+    ep.meta.as_ref().and_then(|m| m.spotify_status.as_deref()) == Some("ready")
+}
+
 /// What the Spotify button's tooltip says, given what the sidecar last
 /// recorded about it.
 fn spotify_button_title(ep: &Episode, sending: bool) -> String {
@@ -284,10 +297,16 @@ fn spotify_button_title(ep: &Episode, sending: bool) -> String {
 /// Kick off a send. `state.spotify_send` is set here, synchronously, so the
 /// button disables on the same click that starts the task — a second click
 /// before the task's first `.await` cannot slip through.
-fn send_to_spotify(mut state: AppState, stem: String, audio: PathBuf, title: String) {
+fn send_to_spotify(
+    mut state: AppState,
+    stem: String,
+    audio: PathBuf,
+    title: String,
+    script: Option<PathBuf>,
+) {
     state.spotify_send.set(Some(stem.clone()));
     spawn(async move {
-        run_spotify_send(state, &stem, &audio, &title).await;
+        run_spotify_send(state, &stem, &audio, &title, script.as_deref()).await;
         // Every exit path — success, a CLI error, a timeout — funnels through
         // here, so the guard can never be left set by a forgotten branch.
         state.spotify_send.set(None);
@@ -296,7 +315,13 @@ fn send_to_spotify(mut state: AppState, stem: String, audio: PathBuf, title: Str
 
 /// Cover image, show, upload, then poll to a terminal readiness — logging
 /// and writing the sidecar at each transition.
-async fn run_spotify_send(mut state: AppState, stem: &str, audio: &Path, title: &str) {
+async fn run_spotify_send(
+    mut state: AppState,
+    stem: &str,
+    audio: &Path,
+    title: &str,
+    script: Option<&Path>,
+) {
     let Some(paths) = state.paths.peek().clone() else { return };
     let meta_path = library::meta_path(&paths, stem);
     let cover = Config::config_dir().join("spotify-cover.jpg");
@@ -325,8 +350,11 @@ async fn run_spotify_send(mut state: AppState, stem: &str, audio: &Path, title: 
         save_config(&mut state.config, |c| c.spotify.show_uri = Some(uri));
     }
 
+    let summary = write_description(state, &paths, script, title).await;
+
     state.log.write().push(LogLevel::Info, format!("spotify: uploading \"{title}\""));
-    let uploaded = match spotify::upload(audio, title, &show_uri, &cover).await {
+    let uploaded = match spotify::upload(audio, title, &show_uri, &cover, summary.as_deref()).await
+    {
         Ok(u) => u,
         Err(e) => {
             state.log.write().push(LogLevel::Error, format!("spotify: {e}"));
@@ -356,7 +384,7 @@ async fn run_spotify_send(mut state: AppState, stem: &str, audio: &Path, title: 
                         state.log.write().push(LogLevel::Error, "spotify: processing failed".to_string());
                         return;
                     }
-                    Readiness::Processing => {}
+                    Readiness::Pending(_) => {}
                 }
             }
             Err(e) => {
@@ -374,6 +402,42 @@ async fn run_spotify_send(mut state: AppState, stem: &str, audio: &Path, title: 
             return;
         }
         tokio::time::sleep(spotify::POLL_INTERVAL).await;
+    }
+}
+
+/// Ask Haiku for the show-notes blurb, logging whichever way it goes.
+///
+/// Always returns — a missing description never stops a send. The episode is
+/// the thing being published; the blurb under it is worth one Haiku call and
+/// no more than that, which is why every failure here is a log line rather
+/// than an early return.
+async fn write_description(
+    mut state: AppState,
+    paths: &Paths,
+    script: Option<&Path>,
+    title: &str,
+) -> Option<String> {
+    // A hand-dropped audio file with no script beside it. Nothing to read.
+    let script = script?;
+
+    state.log.write().push(LogLevel::Info, "spotify: writing a description".to_string());
+    match describe::describe(paths, script, title).await {
+        Ok(Some(text)) => {
+            state.log.write().push(LogLevel::Info, format!("spotify: description - {text}"));
+            Some(text)
+        }
+        Ok(None) => {
+            state
+                .log
+                .write()
+                .push(LogLevel::Warn, "spotify: no description written".to_string());
+            None
+        }
+        Err(e) => {
+            // Deliberately not "failed": the send is still going ahead.
+            state.log.write().push(LogLevel::Warn, format!("spotify: {e}"));
+            None
+        }
     }
 }
 

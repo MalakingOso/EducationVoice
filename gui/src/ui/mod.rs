@@ -10,6 +10,7 @@ pub mod run_view;
 pub mod script_editor;
 pub mod script_page;
 pub mod settings_page;
+pub mod spotify_section;
 pub mod status_log;
 
 use dioxus::desktop::tao::window::Icon;
