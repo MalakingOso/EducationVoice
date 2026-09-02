@@ -61,6 +61,9 @@ pub struct RunMeta {
     pub device: Option<String>,
     /// The Claude model that wrote the script.
     pub model: Option<String>,
+    /// The model behind the researcher sub-agent the writer delegated to.
+    /// Recorded for the sidecar's honesty; the Library does not display it.
+    pub research_model: Option<String>,
     /// When the run started, which is the day the Library groups it under.
     /// `None` for a sidecar this build wrote by hand during a rename.
     pub started: Option<chrono::DateTime<chrono::Local>>,

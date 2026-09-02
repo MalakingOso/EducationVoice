@@ -21,7 +21,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::paths::Paths;
-use crate::proto::{self, PyEvent};
+use crate::proto::{self, PyEvent, Stage};
 
 /// Depth of the event channel. Comfortably more than the ~200 progress events
 /// a whole synthesis emits, so the buffer only matters if the UI stops
@@ -53,6 +53,12 @@ pub enum RunKind {
         source: String,
         hosts: u8,
         script_out: PathBuf,
+        /// `--model`, the writer pass.
+        write_model: String,
+        /// `--edit-model`, the creative-director edit pass.
+        edit_model: String,
+        /// `--research-model`, the researcher sub-agent the writer delegates to.
+        research_model: String,
     },
     /// Stage 2: synthesize a script that already exists on disk, edited or not.
     Synth {
@@ -73,6 +79,12 @@ pub enum RunKind {
         voices: Vec<String>,
         output: PathBuf,
         script_out: PathBuf,
+        /// `--model`, the writer pass.
+        write_model: String,
+        /// `--edit-model`, the creative-director edit pass.
+        edit_model: String,
+        /// `--research-model`, the researcher sub-agent the writer delegates to.
+        research_model: String,
     },
     /// Resolve voices up front, so the gated flow fails in seconds rather
     /// than at the gate.
@@ -94,11 +106,17 @@ impl RunKind {
                 source,
                 hosts,
                 script_out,
+                write_model,
+                edit_model,
+                research_model,
             } => {
                 a.push(source.clone());
                 push_hosts(&mut a, *hosts);
                 a.push("--script-only".into());
                 push_path(&mut a, "--script-out", script_out);
+                push_model(&mut a, "--model", write_model);
+                push_model(&mut a, "--edit-model", edit_model);
+                push_model(&mut a, "--research-model", research_model);
                 a.push("--progress-json".into());
             }
             RunKind::Synth {
@@ -119,12 +137,18 @@ impl RunKind {
                 voices,
                 output,
                 script_out,
+                write_model,
+                edit_model,
+                research_model,
             } => {
                 a.push(source.clone());
                 push_hosts(&mut a, *hosts);
                 push_voices(&mut a, voices);
                 push_path(&mut a, "--output", output);
                 push_path(&mut a, "--script-out", script_out);
+                push_model(&mut a, "--model", write_model);
+                push_model(&mut a, "--edit-model", edit_model);
+                push_model(&mut a, "--research-model", research_model);
                 a.push("--progress-json".into());
             }
             // Errors still need to arrive as events, so this one carries the
@@ -145,6 +169,23 @@ impl RunKind {
             RunKind::FetchVoices => false,
         }
     }
+
+    /// The stages this invocation will actually run, in order.
+    ///
+    /// The run view draws one row per entry, so this is what stops a gated
+    /// stage 2 from listing an ingest and a script it is never going to
+    /// perform — those ran in a *previous process*, and `RunState::begin`
+    /// wipes the struct between the two. A `Synth` started from the Library to
+    /// re-voice an old script has no earlier stages at all, which is the same
+    /// answer for a different reason.
+    pub fn stages(&self) -> &'static [Stage] {
+        match self {
+            RunKind::Script { .. } => &[Stage::Ingest, Stage::Script],
+            RunKind::Synth { .. } => &[Stage::Tts],
+            RunKind::OneShot { .. } => &[Stage::Ingest, Stage::Script, Stage::Tts],
+            RunKind::FetchVoices => &[],
+        }
+    }
 }
 
 fn push_hosts(a: &mut Vec<String>, hosts: u8) {
@@ -155,6 +196,11 @@ fn push_hosts(a: &mut Vec<String>, hosts: u8) {
 fn push_path(a: &mut Vec<String>, flag: &str, p: &Path) {
     a.push(flag.into());
     a.push(p.to_string_lossy().into_owned());
+}
+
+fn push_model(a: &mut Vec<String>, flag: &str, model: &str) {
+    a.push(flag.into());
+    a.push(model.to_string());
 }
 
 /// `--voices` takes N names in speaker order. Omitted entirely when empty, so

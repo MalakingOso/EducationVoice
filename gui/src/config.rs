@@ -41,6 +41,19 @@ pub struct RunSettings {
     /// caught before it costs a full TTS pass.
     #[serde(default)]
     pub auto_continue: bool,
+    /// `--model`: the writer pass that researches and drafts. Defaults to the
+    /// CLI's own `SCRIPT_MODEL`, unvalidated the same way `device.gpu_mask`
+    /// is — the CLI accepts any model string and passes it straight through.
+    #[serde(default = "default_write_model")]
+    pub write_model: String,
+    /// `--edit-model`: the closed-book pass that edits the draft for
+    /// AI-sounding tells. Defaults to the CLI's own `EDIT_MODEL`.
+    #[serde(default = "default_edit_model")]
+    pub edit_model: String,
+    /// `--research-model`: the sub-agent the writer sends into the literature.
+    /// Defaults to the CLI's own `RESEARCH_MODEL`.
+    #[serde(default = "default_research_model")]
+    pub research_model: String,
 }
 
 /// The voice picker's state.
@@ -77,6 +90,15 @@ const HOST_CHOICES: [u8; 3] = [2, 3, 4];
 
 fn default_hosts() -> u8 { 2 }
 
+/// Mirrors `article2pod.py`'s `SCRIPT_MODEL`.
+fn default_write_model() -> String { "claude-sonnet-5".to_string() }
+
+/// Mirrors `article2pod.py`'s `EDIT_MODEL`.
+fn default_edit_model() -> String { "claude-opus-5".to_string() }
+
+/// Mirrors `article2pod.py`'s `RESEARCH_MODEL`.
+fn default_research_model() -> String { "claude-sonnet-5".to_string() }
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -93,6 +115,9 @@ impl Default for RunSettings {
         Self {
             hosts: default_hosts(),
             auto_continue: false,
+            write_model: default_write_model(),
+            edit_model: default_edit_model(),
+            research_model: default_research_model(),
         }
     }
 }
@@ -272,6 +297,9 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.run.hosts, 2);
         assert!(!config.run.auto_continue, "the script-review gate is on until asked otherwise");
+        assert_eq!(config.run.write_model, "claude-sonnet-5", "matches the CLI's own SCRIPT_MODEL");
+        assert_eq!(config.run.edit_model, "claude-opus-5", "matches the CLI's own EDIT_MODEL");
+        assert_eq!(config.run.research_model, "claude-sonnet-5", "matches the CLI's own RESEARCH_MODEL");
         assert!(config.voices.selected.is_empty(), "an empty list defers to the CLI's roster");
         assert_eq!(config.device.gpu_mask, "", "an empty mask leaves ZE_AFFINITY_MASK unset");
         assert!(config.spotify.show_uri.is_none(), "no show exists until the first send");
@@ -284,6 +312,9 @@ mod tests {
             run: RunSettings {
                 hosts: 3,
                 auto_continue: true,
+                write_model: "claude-fable-5-1".into(),
+                edit_model: "claude-fable-5-1".into(),
+                research_model: "claude-opus-5".into(),
             },
             voices: VoiceSettings {
                 selected: vec!["alice".into(), "carter".into(), "maya".into()],

@@ -3,6 +3,7 @@
 //! stage must not leave a truthful bar looking like a stalled one.
 
 use super::*;
+use crate::proto::Phase;
 
 fn stage(stage: Stage, status: StageStatus) -> PyEvent {
     PyEvent::Stage {
@@ -12,6 +13,7 @@ fn stage(stage: Stage, status: StageStatus) -> PyEvent {
         path: None,
         device: None,
         model: None,
+        research_model: None,
     }
 }
 
@@ -26,7 +28,7 @@ fn progress(step: u64, total: Option<u64>) -> PyEvent {
 #[test]
 fn script_generation_never_produces_a_drawable_fraction() {
     let mut s = RunState::default();
-    s.begin(Instant::now());
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script]);
     s.apply(&stage(Stage::Ingest, StageStatus::Start));
     s.apply(&stage(Stage::Ingest, StageStatus::Done));
     s.apply(&stage(Stage::Script, StageStatus::Start));
@@ -42,6 +44,33 @@ fn script_generation_never_produces_a_drawable_fraction() {
         "Claude's turn count is not a fraction of anything, so stage 1 must \
          show no track and no percentage — a bar here would be invented"
     );
+}
+
+#[test]
+fn a_phase_event_moves_the_detail_line_and_nothing_measurable() {
+    let mut s = RunState::default();
+    s.begin(Instant::now(), &[Stage::Script]);
+    s.apply(&stage(Stage::Script, StageStatus::Start));
+    assert_eq!(s.detail, "writing the script");
+
+    for (phase, label) in [
+        (Phase::Researching, "researching the literature"),
+        (Phase::Writing, "writing the script"),
+        (Phase::Editing, "editing the script"),
+    ] {
+        s.apply(&PyEvent::Phase {
+            stage: Stage::Script,
+            phase,
+        });
+        assert_eq!(s.detail, label, "the strip must say which phase the script stage is in");
+        assert_eq!(s.stage, Some(Stage::Script));
+        assert_eq!(s.state, StageState::Running);
+        assert_eq!(
+            s.measured,
+            Measured::Unmeasurable,
+            "a phase is a landmark, never a fraction; the strip must not draw a bar from it"
+        );
+    }
 }
 
 #[test]
@@ -64,14 +93,19 @@ fn the_bar_appears_only_once_a_real_denominator_arrives() {
 }
 
 #[test]
-fn a_completed_tts_stage_snaps_a_partial_bar_to_full() {
+fn a_completed_tts_stage_leaves_its_partial_fraction_alone() {
     // The real numbers from a 4-line synthesis: max_steps was 2166 and the
     // loop broke out at 470 because the model had finished.
+    //
+    // This used to snap to full on Done, because a bar frozen at 22% read as
+    // a stall. Nothing draws that bar now — max_steps is an upper bound, not
+    // a prediction, and a display built on it was always going to be either
+    // wrong or corrected. So the state keeps what the child actually said and
+    // corrects nothing, which is the property worth pinning: the correction
+    // must not creep back in alongside a new consumer of `measured`.
     let mut s = RunState::default();
     s.apply(&stage(Stage::Tts, StageStatus::Start));
     s.apply(&progress(470, Some(2166)));
-    assert_eq!(s.measured, Measured::Fraction(470.0 / 2166.0));
-
     s.apply(&PyEvent::Stage {
         stage: Stage::Tts,
         status: StageStatus::Done,
@@ -79,16 +113,16 @@ fn a_completed_tts_stage_snaps_a_partial_bar_to_full() {
         path: Some("output/smoke.wav".into()),
         device: None,
         model: None,
+        research_model: None,
     });
 
     assert_eq!(
         s.measured,
-        Measured::Fraction(1.0),
-        "max_steps is an upper bound the loop breaks out of, so a successful \
-         episode would otherwise end with the bar frozen around 22% — which \
-         reads as a failure rather than as a finish"
+        Measured::Fraction(470.0 / 2166.0),
+        "the run reported 470 of at most 2166 and then finished; inventing a \
+         full bar out of that is the thing this display stopped doing"
     );
-    assert_eq!(s.step, 2166, "the step count must agree with the full bar");
+    assert_eq!(s.step, 470, "the step count is the child's, not the UI's");
 }
 
 #[test]
@@ -126,6 +160,110 @@ fn starting_a_stage_clears_the_previous_stages_denominator() {
 }
 
 #[test]
+fn a_gated_stage_two_lists_only_the_stage_it_will_actually_run() {
+    // The default flow is two processes, not one paused one. Stage 2 is a
+    // fresh RunState that never saw ingest or script, so listing them would
+    // show two rows stuck on pending for the whole synthesis.
+    let mut s = RunState::default();
+    s.begin(Instant::now(), &[Stage::Tts]);
+    s.apply(&stage(Stage::Tts, StageStatus::Start));
+
+    assert_eq!(s.stages, vec![Stage::Tts]);
+    assert_eq!(s.state_of(Stage::Tts), StageState::Running);
+    assert_eq!(
+        s.state_of(Stage::Script),
+        StageState::Pending,
+        "a stage outside this run's plan must never claim to have finished — \
+         it ran in a different process, and this one has no way to know"
+    );
+}
+
+#[test]
+fn the_checklist_reads_forward_from_the_current_stage() {
+    let mut s = RunState::default();
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script, Stage::Tts]);
+    s.apply(&stage(Stage::Ingest, StageStatus::Start));
+    s.apply(&stage(Stage::Ingest, StageStatus::Done));
+    s.apply(&stage(Stage::Script, StageStatus::Start));
+
+    assert_eq!(s.state_of(Stage::Ingest), StageState::Done);
+    assert_eq!(s.state_of(Stage::Script), StageState::Running);
+    assert_eq!(s.state_of(Stage::Tts), StageState::Pending);
+}
+
+#[test]
+fn a_failed_stage_fails_its_own_row_and_not_the_ones_behind_it() {
+    let mut s = RunState::default();
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script, Stage::Tts]);
+    s.apply(&stage(Stage::Ingest, StageStatus::Done));
+    s.apply(&stage(Stage::Script, StageStatus::Start));
+    s.apply(&PyEvent::Error { text: "the writer returned nothing".into() });
+
+    assert_eq!(s.state_of(Stage::Script), StageState::Failed);
+    assert_eq!(
+        s.state_of(Stage::Ingest),
+        StageState::Done,
+        "ingest really did finish; a later failure must not retract it"
+    );
+}
+
+#[test]
+fn the_reasoning_feed_never_shows_the_finished_script() {
+    // article2pod.py selects the script as the last message containing
+    // Speaker lines, which means the whole episode arrives through the same
+    // channel as the plan. The run view is not where a script gets read.
+    let mut s = RunState::default();
+    s.begin(Instant::now(), &[Stage::Script]);
+
+    s.apply(&PyEvent::Message {
+        text: "Three threads worth pulling here. The reversal timing is the \
+               one a listener can hold onto."
+            .into(),
+    });
+    assert!(s.last_message.as_deref().unwrap().starts_with("Three threads"));
+
+    s.apply(&PyEvent::Message {
+        text: "Speaker 1: So the trial was stopped early.\n\
+               Speaker 2: Which is where it gets interesting."
+            .into(),
+    });
+    assert!(
+        s.last_message.as_deref().unwrap().starts_with("Three threads"),
+        "the draft arrived and was correctly ignored; the panel must still be \
+         showing the reasoning that preceded it"
+    );
+}
+
+#[test]
+fn prose_that_merely_mentions_a_speaker_is_still_reasoning() {
+    // The writer's plan and the editor's commentary both discuss the script
+    // in prose. Only a line *formatted* as dialogue is the draft.
+    let mut s = RunState::default();
+    s.apply(&PyEvent::Message {
+        text: "I'll give Speaker 2 the counterargument, and let Speaker 1 \
+               concede it in the third act."
+            .into(),
+    });
+    assert!(
+        s.last_message.is_some(),
+        "this is the editor thinking out loud, not a script; dropping it would \
+         empty the panel during exactly the stage it exists for"
+    );
+}
+
+#[test]
+fn an_empty_assistant_turn_does_not_blank_the_panel() {
+    let mut s = RunState::default();
+    s.apply(&PyEvent::Message { text: "planning the shape".into() });
+    s.apply(&PyEvent::Message { text: "   \n  ".into() });
+    assert_eq!(
+        s.last_message.as_deref(),
+        Some("planning the shape"),
+        "a whitespace-only turn is not a new thought and must not replace one"
+    );
+}
+
+#[test]
 fn the_device_is_recorded_so_a_gpu_toggle_mistake_is_visible() {
     let mut s = RunState::default();
     s.apply(&PyEvent::Stage {
@@ -135,6 +273,7 @@ fn the_device_is_recorded_so_a_gpu_toggle_mistake_is_visible() {
         path: None,
         device: Some("xpu".into()),
         model: None,
+        research_model: None,
     });
     assert_eq!(s.device.as_deref(), Some("xpu"));
 }
@@ -149,6 +288,7 @@ fn the_script_path_is_captured_because_the_gate_opens_it() {
         path: Some("output/ep.script.txt".into()),
         device: None,
         model: None,
+        research_model: None,
     });
     assert_eq!(
         s.script_path,
@@ -184,7 +324,7 @@ fn warnings_accumulate_rather_than_replacing_one_another() {
 #[test]
 fn a_cancelled_run_is_never_recorded_as_finished() {
     let mut s = RunState::default();
-    s.begin(Instant::now());
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script]);
     s.apply(&stage(Stage::Tts, StageStatus::Start));
     s.finish(&RunOutcome::Cancelled);
 
@@ -200,7 +340,7 @@ fn a_cancelled_run_is_never_recorded_as_finished() {
 fn a_nonzero_exit_with_no_error_event_still_reports_something_useful() {
     // The traceback path: Python died before emitting an error event.
     let mut s = RunState::default();
-    s.begin(Instant::now());
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script]);
     s.finish(&RunOutcome::Failed { code: Some(1) });
 
     assert_eq!(s.state, StageState::Failed);
@@ -239,7 +379,7 @@ fn beginning_a_run_clears_the_previous_runs_wreckage() {
     let mut s = RunState::default();
     s.apply(&PyEvent::Error { text: "old failure".into() });
     s.apply(&PyEvent::Warning { text: "old warning".into() });
-    s.begin(Instant::now());
+    s.begin(Instant::now(), &[Stage::Ingest, Stage::Script]);
 
     assert!(s.last_error.is_none(), "a fresh run must not show a stale error");
     assert!(s.warnings.is_empty());
@@ -269,7 +409,7 @@ fn an_idle_state_reports_no_elapsed_time_rather_than_a_garbage_one() {
 fn a_full_successful_run_replayed_end_to_end_lands_in_the_right_place() {
     // The exact event order a real `--from-script` run produced.
     let mut s = RunState::default();
-    s.begin(Instant::now());
+    s.begin(Instant::now(), &[Stage::Tts]);
     s.apply(&PyEvent::Stage {
         stage: Stage::Script,
         status: StageStatus::Done,
@@ -277,6 +417,7 @@ fn a_full_successful_run_replayed_end_to_end_lands_in_the_right_place() {
         path: Some("/tmp/four_lines.txt".into()),
         device: None,
         model: None,
+        research_model: None,
     });
     s.apply(&PyEvent::Stage {
         stage: Stage::Tts,
@@ -285,6 +426,7 @@ fn a_full_successful_run_replayed_end_to_end_lands_in_the_right_place() {
         path: None,
         device: Some("xpu".into()),
         model: None,
+        research_model: None,
     });
     for step in (0..=430).step_by(10) {
         s.apply(&progress(step, Some(2166)));
@@ -296,12 +438,17 @@ fn a_full_successful_run_replayed_end_to_end_lands_in_the_right_place() {
         path: Some("output/smoke2.wav".into()),
         device: None,
         model: None,
+        research_model: None,
     });
     s.apply(&PyEvent::Done { output: "output/smoke2.wav".into() });
     s.finish(&RunOutcome::Completed);
 
     assert_eq!(s.state, StageState::Done);
-    assert_eq!(s.measured, Measured::Fraction(1.0));
+    assert_eq!(
+        s.measured,
+        Measured::Fraction(430.0 / 2166.0),
+        "the last progress event the child sent, kept verbatim"
+    );
     assert_eq!(s.output_path, Some(PathBuf::from("output/smoke2.wav")));
     assert_eq!(s.device.as_deref(), Some("xpu"));
     assert!(s.last_error.is_none());

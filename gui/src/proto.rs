@@ -37,6 +37,37 @@ impl Stage {
     }
 }
 
+/// What the script stage is doing right now, within a single `stage` span.
+///
+/// The script stage is one silent multi-minute call from the outside, and
+/// these are the only landmarks inside it: the writer is in the literature,
+/// or has planned and is writing, or the editor has the draft. Derived on
+/// the Python side from the shape of the SDK stream (tool calls versus a long
+/// tool-free plan), so it is a best-effort reading rather than a measurement,
+/// which is why it feeds the strip's detail line and nothing that looks like
+/// progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    Researching,
+    Writing,
+    Editing,
+    #[serde(other)]
+    Unknown,
+}
+
+impl Phase {
+    /// The strip's detail line while this phase is current.
+    pub fn label(self) -> &'static str {
+        match self {
+            Phase::Researching => "researching the literature",
+            Phase::Writing => "writing the script",
+            Phase::Editing => "editing the script",
+            Phase::Unknown => "working",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StageStatus {
@@ -65,10 +96,18 @@ pub enum PyEvent {
         device: Option<String>,
         #[serde(default)]
         model: Option<String>,
+        /// The researcher sub-agent's model, on the script stage's start event.
+        #[serde(default)]
+        research_model: Option<String>,
     },
     /// One assistant turn, emitted live during script generation.
     Message {
         text: String,
+    },
+    /// A landmark inside the script stage. See [`Phase`].
+    Phase {
+        stage: Stage,
+        phase: Phase,
     },
     /// The article's title, emitted during ingest so it is available even on
     /// a `--script-only` run — which is stage 1 of the gated flow, and the
@@ -178,6 +217,7 @@ mod tests {
                 path: None,
                 device: None,
                 model: None,
+                research_model: None,
             },
             "the ingest start event carries no extra fields and must not need any"
         );
@@ -196,6 +236,29 @@ mod tests {
                 );
             }
             other => panic!("expected a stage event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_phase_event_parses_to_its_phase() {
+        let got = parse_line(r#"{"event": "phase", "stage": "script", "phase": "researching"}"#)
+            .unwrap();
+        assert_eq!(
+            got,
+            PyEvent::Phase {
+                stage: Stage::Script,
+                phase: Phase::Researching,
+            },
+            "this is the line article2pod.py emits when the writer starts calling tools"
+        );
+    }
+
+    #[test]
+    fn an_unknown_phase_name_parses_as_unknown_rather_than_failing() {
+        let got = parse_line(r#"{"event":"phase","stage":"script","phase":"mastering"}"#).unwrap();
+        match got {
+            PyEvent::Phase { phase, .. } => assert_eq!(phase, Phase::Unknown),
+            other => panic!("expected a phase event, got {other:?}"),
         }
     }
 

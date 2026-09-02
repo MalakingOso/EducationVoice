@@ -13,8 +13,10 @@ const CSS: &str = include_str!("../assets/styles.css");
 const MARKUP: &[(&str, &str)] = &[
     ("app.rs", include_str!("../src/ui/app.rs")),
     ("components.rs", include_str!("../src/ui/components.rs")),
+    ("icons.rs", include_str!("../src/ui/icons.rs")),
     ("run_strip.rs", include_str!("../src/ui/run_strip.rs")),
     ("run_page.rs", include_str!("../src/ui/run_page.rs")),
+    ("run_view.rs", include_str!("../src/ui/run_view.rs")),
     ("script_page.rs", include_str!("../src/ui/script_page.rs")),
     ("script_editor.rs", include_str!("../src/ui/script_editor.rs")),
     ("library_page.rs", include_str!("../src/ui/library_page.rs")),

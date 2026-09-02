@@ -9,8 +9,6 @@
 
 use dioxus::prelude::*;
 
-use crate::proto::Stage;
-use crate::ui::run_state::StageState;
 
 /// Truncate `text` to at most `max_chars` characters, appending an ellipsis
 /// when anything was cut.
@@ -156,52 +154,6 @@ pub fn TagChip(props: TagChipProps) -> Element {
                 onclick: move |_| props.onremove.call(()),
                 "\u{2715}"
             }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-pub struct ProgressBarProps {
-    /// 0.0 to 1.0. Callers pass this only when they hold a real denominator —
-    /// see `Measured`, which is what decides whether this renders at all.
-    value: f32,
-}
-
-/// The measured progress bar. Lives only inside the run strip, which is the
-/// only surface holding a denominator worth drawing.
-#[component]
-pub fn ProgressBar(props: ProgressBarProps) -> Element {
-    // Clamped again here rather than trusted: a NaN width silently collapses
-    // the element instead of erroring, which is invisible in review.
-    let pct = if props.value.is_finite() {
-        (props.value * 100.0).clamp(0.0, 100.0)
-    } else {
-        0.0
-    };
-    rsx! {
-        div { class: "progress-track",
-            div { class: "progress-fill", style: "width: {pct}%" }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-pub struct StageChipProps {
-    stage: Stage,
-    state: StageState,
-}
-
-/// Stage name plus its status dot.
-///
-/// Running takes the accent and finished takes `--success`, which are distinct
-/// hues again. The pulse on `.running` stays anyway: hue alone is not a
-/// difference every reader can see.
-#[component]
-pub fn StageChip(props: StageChipProps) -> Element {
-    rsx! {
-        div { class: "stage-chip",
-            div { class: "stage-dot {props.state.dot_class()}" }
-            span { class: "run-strip-stage", "{props.stage.label()}" }
         }
     }
 }

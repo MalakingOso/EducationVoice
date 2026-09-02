@@ -6,6 +6,7 @@ pub mod library_page;
 pub mod run_page;
 pub mod run_state;
 pub mod run_strip;
+pub mod run_view;
 pub mod script_editor;
 pub mod script_page;
 pub mod settings_page;
@@ -58,7 +59,15 @@ pub fn launch_app() {
                         .with_window_icon(Some(window_icon))
                         // Wider than Beamer's 500px because the script editor
                         // and the run log both need room to be readable.
-                        .with_inner_size(dioxus::desktop::LogicalSize::new(880.0_f64, 680.0_f64))
+                        //
+                        // The height is set by the launcher, which is the one
+                        // page that has to fit whole: it is a single object
+                        // ending in a button, and a scrollbar through the
+                        // middle of it reads as the window being too small for
+                        // the app rather than as more content below. At 680 it
+                        // overflowed by about 55px, which `.content` absorbed
+                        // by clipping its own top padding and the mark with it.
+                        .with_inner_size(dioxus::desktop::LogicalSize::new(880.0_f64, 760.0_f64))
                         .with_min_inner_size(dioxus::desktop::LogicalSize::new(
                             720.0_f64, 560.0_f64,
                         )),

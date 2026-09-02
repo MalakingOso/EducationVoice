@@ -11,6 +11,9 @@ fn script_kind() -> RunKind {
         source: "/home/berkley/ROTBIGS.pdf".into(),
         hosts: 2,
         script_out: PathBuf::from("output/rotbigs.script.txt"),
+        write_model: "claude-sonnet-5".into(),
+        edit_model: "claude-opus-5".into(),
+        research_model: "claude-sonnet-5".into(),
     }
 }
 
@@ -52,12 +55,64 @@ fn neither_tone_nor_length_is_ever_passed() {
             voices: vec!["alice".into(), "carter".into()],
             output: PathBuf::from("output/paper.wav"),
             script_out: PathBuf::from("output/paper.script.txt"),
+            write_model: "claude-sonnet-5".into(),
+            edit_model: "claude-opus-5".into(),
+            research_model: "claude-sonnet-5".into(),
         },
     ] {
         let argv = kind.argv();
         assert!(!argv.contains(&"--tone".to_string()), "in {argv:?}");
         assert!(!argv.contains(&"--length".to_string()), "in {argv:?}");
     }
+}
+
+#[test]
+fn the_chosen_writer_editor_and_researcher_models_reach_argv_distinctly() {
+    for kind in [
+        RunKind::Script {
+            source: "src.pdf".into(),
+            hosts: 2,
+            script_out: PathBuf::from("s.txt"),
+            write_model: "claude-fable-5-1".into(),
+            edit_model: "claude-opus-5".into(),
+            research_model: "claude-sonnet-5".into(),
+        },
+        RunKind::OneShot {
+            source: "src.pdf".into(),
+            hosts: 2,
+            voices: vec!["alice".into()],
+            output: PathBuf::from("o.wav"),
+            script_out: PathBuf::from("s.txt"),
+            write_model: "claude-fable-5-1".into(),
+            edit_model: "claude-opus-5".into(),
+            research_model: "claude-sonnet-5".into(),
+        },
+    ] {
+        let argv = kind.argv();
+        let m = argv.iter().position(|a| a == "--model").expect("--model present");
+        assert_eq!(argv[m + 1], "claude-fable-5-1", "the writer model, not the editor's");
+        let e = argv.iter().position(|a| a == "--edit-model").expect("--edit-model present");
+        assert_eq!(argv[e + 1], "claude-opus-5", "the editor model, not the writer's");
+        let r = argv.iter().position(|a| a == "--research-model").expect("--research-model present");
+        assert_eq!(argv[r + 1], "claude-sonnet-5", "the researcher model, not the writer's");
+    }
+}
+
+#[test]
+fn synth_and_fetch_voices_never_mention_a_model() {
+    // Neither stage touches Claude: synth reads a script already on disk, and
+    // fetch-voices is a roster query. A model flag there would be a lie.
+    let synth = RunKind::Synth {
+        script: "s.txt".into(),
+        hosts: 2,
+        voices: vec!["alice".into()],
+        output: "o.wav".into(),
+    }
+    .argv();
+    assert!(!synth.iter().any(|a| a == "--model" || a == "--edit-model"), "in {synth:?}");
+
+    let fetch = RunKind::FetchVoices.argv();
+    assert!(!fetch.iter().any(|a| a == "--model" || a == "--edit-model"), "in {fetch:?}");
 }
 
 #[test]
@@ -107,6 +162,9 @@ fn auto_continue_is_one_invocation_carrying_both_outputs() {
         voices: vec!["alice".into(), "carter".into()],
         output: PathBuf::from("output/paper.wav"),
         script_out: PathBuf::from("output/paper.script.txt"),
+        write_model: "claude-sonnet-5".into(),
+        edit_model: "claude-opus-5".into(),
+        research_model: "claude-sonnet-5".into(),
     }
     .argv();
 
@@ -149,7 +207,14 @@ fn every_flag_is_followed_by_its_value_and_never_by_another_flag() {
     // Catches a push_path/push_voices call that forgot its payload — the
     // failure mode is argparse consuming the next flag as the value, which
     // produces a confusing error minutes into a run rather than at spawn.
-    let takes_value = ["--hosts", "--output", "--script-out", "--from-script"];
+    let takes_value = [
+        "--hosts",
+        "--output",
+        "--script-out",
+        "--from-script",
+        "--model",
+        "--edit-model",
+    ];
     for kind in [
         script_kind(),
         RunKind::Synth {
@@ -164,6 +229,9 @@ fn every_flag_is_followed_by_its_value_and_never_by_another_flag() {
             voices: vec!["alice".into()],
             output: "o.wav".into(),
             script_out: "s.txt".into(),
+            write_model: "claude-sonnet-5".into(),
+            edit_model: "claude-opus-5".into(),
+            research_model: "claude-sonnet-5".into(),
         },
     ] {
         let argv = kind.argv();

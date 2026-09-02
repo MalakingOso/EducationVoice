@@ -1,13 +1,16 @@
 //! The Run page: point at an article and start.
 //!
 //! Everything that is set once — hosts, voices, the device, the log — lives in
-//! Settings. What is left here is the one thing that changes per run: the
-//! source, whether to stop at the script, and the button.
+//! Settings. What is left here is what changes per run: the source, whether
+//! to stop at the script, which models write and edit the script, and the
+//! button. The model choice still persists to the same config file Settings
+//! writes to — it just lives here because it is the one "set once" knob
+//! someone is likely to flip on a given article rather than leave alone.
 //!
 //! It is laid out as a launcher: the mark and the name, the drop zone, and
-//! one action row, centred as a group. Everything a drop can say — the
-//! prompt, a refusal, the chosen file — is said inside the zone, so the row
-//! under it never moves.
+//! one action row, centred as a group. Everything a drop can say (the prompt,
+//! a refusal, the chosen file) is said inside the zone, so the row under it
+//! never moves.
 
 use std::path::{Path, PathBuf};
 
@@ -18,9 +21,28 @@ use crate::config::save_config;
 use crate::paths::episode_stem;
 use crate::runner::RunKind;
 use crate::ui::app::{AppState, RunRequest};
-use crate::ui::components::Toggle;
+use crate::ui::components::{Card, Select, Toggle};
+use crate::ui::run_view::RunView;
 use crate::ui::icons::{IconMark, IconTrayArrowDown, IconX};
 use crate::ui::status_log::LogLevel;
+
+/// The models `article2pod.py` accepts as `--model`, `--edit-model` and
+/// `--research-model`. Writing offers this list; nothing pairs the choices.
+const MODELS: &[(&str, &str)] = &[
+    ("claude-sonnet-5", "Sonnet"),
+    ("claude-opus-5", "Opus"),
+    ("claude-fable-5-1", "Fable"),
+];
+
+/// Editing and research also offer Haiku: both are a sub-agent's model
+/// rather than the writer's own, so Haiku's speed is worth the option there
+/// in a way it is not for the prose itself.
+const RESEARCH_AND_EDIT_MODELS: &[(&str, &str)] = &[
+    ("claude-sonnet-5", "Sonnet"),
+    ("claude-opus-5", "Opus"),
+    ("claude-fable-5-1", "Fable"),
+    ("claude-haiku-4-5-20251001", "Haiku"),
+];
 
 /// What the pipeline can read from a local file.
 ///
@@ -136,6 +158,19 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
     let mut hovering = use_signal(|| false);
     let mut refusal = use_signal(|| None::<String>);
 
+    // The run view is laid *over* the launcher rather than swapped for it.
+    //
+    // That is what the dissolve needs: the dark has to build out across the
+    // thing it is replacing, and a matrix arriving over a blank grey rectangle
+    // is a different, worse animation. It also means the exit reveals the
+    // launcher already in place rather than mounting it into view.
+    //
+    // The condition is `stage.is_some()` rather than `is_running()` so the
+    // view survives the run ending: a success holds it for the length of the
+    // exit dissolve before `drive_run` clears the stage, and a failure holds
+    // it until dismissed.
+    let in_run = state.run.read().stage.is_some();
+
     // Drop and Browse land here identically; there is no second path to keep
     // in step.
     let mut take_file = move |path: PathBuf| match accept_source(&path.to_string_lossy()) {
@@ -164,10 +199,11 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
     };
 
     rsx! {
-        div { class: "content",
+        div { class: "run-page-stack",
+            div { class: "content",
             div { class: "launcher",
                 div { class: "launcher-head",
-                    IconMark { size: 72, class: "launcher-mark" }
+                    IconMark { class: "launcher-mark", size: 72 }
                     div { class: "launcher-title", "article2pod" }
                     div { class: "launcher-tagline", "Turn an article into a podcast episode." }
                 }
@@ -260,6 +296,39 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
                     }
                 }
 
+                Card { title: "Models",
+                    div { class: "card-row",
+                        span { class: "card-label", "Writing" }
+                        Select {
+                            value: cfg.run.write_model.clone(),
+                            options: MODELS.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect(),
+                            onchange: move |v: String| {
+                                save_config(&mut state.config, |c| c.run.write_model = v);
+                            },
+                        }
+                    }
+                    div { class: "card-row",
+                        span { class: "card-label", "Editing" }
+                        Select {
+                            value: cfg.run.edit_model.clone(),
+                            options: RESEARCH_AND_EDIT_MODELS.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect(),
+                            onchange: move |v: String| {
+                                save_config(&mut state.config, |c| c.run.edit_model = v);
+                            },
+                        }
+                    }
+                    div { class: "card-row",
+                        span { class: "card-label", "Research" }
+                        Select {
+                            value: cfg.run.research_model.clone(),
+                            options: RESEARCH_AND_EDIT_MODELS.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect(),
+                            onchange: move |v: String| {
+                                save_config(&mut state.config, |c| c.run.research_model = v);
+                            },
+                        }
+                    }
+                }
+
                 div { class: "run-actions",
                     div { class: "run-toggle",
                         div { class: "card-row",
@@ -287,6 +356,15 @@ pub fn RunPage(state: AppState, runner: Coroutine<RunRequest>) -> Element {
                         if cfg.run.auto_continue { "Make the episode" } else { "Write the script" }
                     }
                 }
+            }
+            }
+
+            // A sibling of the launcher rather than a child of it: the run
+            // view covers the whole content area, and nesting it inside a
+            // scrolling, padded column would inset the dark and let the page
+            // scroll behind it.
+            if in_run {
+                RunView { state }
             }
         }
     }
@@ -355,12 +433,18 @@ fn start_run(
             voices: voices.clone(),
             output,
             script_out,
+            write_model: cfg.run.write_model.clone(),
+            edit_model: cfg.run.edit_model.clone(),
+            research_model: cfg.run.research_model.clone(),
         }
     } else {
         RunKind::Script {
             source: source.clone(),
             hosts: cfg.run.hosts,
             script_out,
+            write_model: cfg.run.write_model.clone(),
+            edit_model: cfg.run.edit_model.clone(),
+            research_model: cfg.run.research_model.clone(),
         }
     };
 

@@ -1,16 +1,26 @@
-//! The run strip: one status surface along the bottom of the window.
+//! The run strip: the same run, seen from another page.
 //!
 //! It sits below `.app-body` rather than inside a page, so it stays visible
-//! while the Library is being browsed mid-synthesis.
+//! while the Library is being browsed mid-synthesis — which is the whole
+//! reason it exists now that the Run page has a view of its own.
+//!
+//! It is deliberately the *same mode* as that view, not the same size: the
+//! near-black ground, the letter-spaced type and the single orange live
+//! marker, compressed into a bar. A run that looked like two different things
+//! depending on which page you were on would read as two different runs.
+//!
+//! It draws no bar and no percentage. There is no denominator in this
+//! pipeline worth rendering — `max_steps` is an upper bound the generation
+//! loop breaks out of early — so the strip says what is happening and how long
+//! it has been happening, and nothing that implies a measurement.
 
 use std::time::Instant;
 
 use dioxus::prelude::*;
 
-use crate::proto::{Measured, Stage};
+use crate::proto::Stage;
 use crate::runner;
-use crate::ui::app::AppState;
-use crate::ui::components::{ProgressBar, StageChip};
+use crate::ui::app::{AppState, Page};
 use crate::ui::icons::IconStop;
 use crate::ui::run_state::format_elapsed;
 
@@ -22,10 +32,14 @@ pub fn RunStrip(state: AppState) -> Element {
 
     let run = state.run.read().clone();
     let running = run.is_running();
+    let page = *state.page.read();
 
-    // Idle *and* never run: nothing to say. After a run ends the strip stays
-    // up showing its final state, which is where the outcome is read.
-    if !running && run.stage.is_none() {
+    // Idle *and* never run: nothing to say.
+    //
+    // Hidden on the Run page too, whatever the run is doing: that page turns
+    // into the run while one is live, and a strip under it would report the
+    // same thing twice.
+    if page == Page::Run || (!running && run.stage.is_none()) {
         return rsx! { div { class: "run-strip hidden" } };
     }
 
@@ -34,26 +48,9 @@ pub fn RunStrip(state: AppState) -> Element {
 
     rsx! {
         div { class: "run-strip",
-            StageChip { stage, state: run.state }
+            span { class: if running { "run-pip" } else { "run-pip disarmed" } }
+            span { class: "run-strip-stage", "{stage.label()}" }
             div { class: "run-strip-detail", "{run.detail}" }
-
-            // The bar exists only when a real denominator does. Script
-            // generation has none — Claude's turn count is not a fraction of
-            // anything — so stage 1 shows a pulsing dot and a clock, and
-            // nothing that implies a measurement. The same display covers the
-            // tqdm shim failing after a vibevoice upgrade: degraded, rather
-            // than a bar frozen at 0% that looks like a stall.
-            match run.measured {
-                Measured::Fraction(f) => rsx! {
-                    ProgressBar { value: f }
-                    span { class: "run-strip-pct", "{(f * 100.0) as u32}%" }
-                    if let Some(total) = run.total {
-                        span { class: "run-strip-count", "{run.step}/{total}" }
-                    }
-                },
-                Measured::Unmeasurable => rsx! {},
-            }
-
             span { class: "run-strip-elapsed", "{elapsed}" }
 
             if running {

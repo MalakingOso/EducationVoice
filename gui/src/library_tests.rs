@@ -38,6 +38,7 @@ fn meta_fixture(source: &str) -> RunMeta {
         voices: vec!["Alice".into(), "Frank".into()],
         device: Some("xpu".into()),
         model: Some("claude-sonnet-4-5".into()),
+        research_model: None,
         started: Some(chrono::Local::now()),
         finished: Some(chrono::Local::now()),
         elapsed_secs: Some(612),

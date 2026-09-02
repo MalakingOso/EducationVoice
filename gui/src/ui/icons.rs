@@ -26,7 +26,9 @@ pub struct IconProps {
 /// is therefore its own element with its own class, coloured in styles.css
 /// under `.mark-*`, where the fills can take the icon's own greys and the cap
 /// the surface colour with an outline that survives the ground. The geometry
-/// is the PNG's, sampled at 512, which is why the view box is not 256.
+/// is the PNG's, sampled at 512, which is why the view box is not 256; it is
+/// then cropped to the symbol's own extent so the tile's margin does not
+/// shrink it inside its box.
 ///
 /// Draw order is the PNG's stacking, back to front: the bottom-left outline,
 /// the two grey fills, the top-right outline, the orange square, the cap.
@@ -38,7 +40,7 @@ pub fn IconMark(props: IconProps) -> Element {
             class: "{props.class}",
             width: "{size}",
             height: "{size}",
-            view_box: "0 0 512 512",
+            view_box: "40 30 432 432",
             rect { class: "mark-line", x: "80", y: "304", width: "148", height: "148", rx: "24" }
             rect { class: "mark-fill", x: "164", y: "282", width: "100", height: "100", rx: "20" }
             rect { class: "mark-fill-light", x: "190", y: "180", width: "132", height: "132", rx: "28" }

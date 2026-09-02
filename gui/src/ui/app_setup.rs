@@ -182,6 +182,13 @@ pub fn log_event(log: &mut Signal<StatusLog>, event: &PyEvent) {
         PyEvent::Message { text } => {
             log_status(log, LogLevel::Info, truncate_chars(text.trim(), 400));
         }
+        PyEvent::Phase { stage, phase } => {
+            log_status(
+                log,
+                LogLevel::Info,
+                format!("{} — {}", stage.label(), phase.label()),
+            );
+        }
         PyEvent::Title { text } => {
             log_status(log, LogLevel::Info, format!("title: {text}"))
         }

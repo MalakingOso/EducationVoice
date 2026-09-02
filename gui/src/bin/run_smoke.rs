@@ -34,6 +34,9 @@ async fn main() -> Result<()> {
     // is: it is how the "no orphaned claude" check is run.
     let mut cancel_after: Option<u64> = None;
     let mut gpu_mask: Option<String> = None;
+    let mut write_model = "claude-sonnet-5".to_string();
+    let mut edit_model = "claude-opus-5".to_string();
+    let mut research_model = "claude-sonnet-5".to_string();
     let mut positional: Vec<String> = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
@@ -45,6 +48,15 @@ async fn main() -> Result<()> {
             // otherwise only visible as "the run used the card I expected".
             "--gpu" => {
                 gpu_mask = it.next();
+            }
+            "--model" => {
+                write_model = it.next().unwrap_or(write_model);
+            }
+            "--edit-model" => {
+                edit_model = it.next().unwrap_or(edit_model);
+            }
+            "--research-model" => {
+                research_model = it.next().unwrap_or(research_model);
             }
             _ => positional.push(a),
         }
@@ -75,6 +87,9 @@ async fn main() -> Result<()> {
             source: arg(&positional, 1, "source")?.to_string(),
             hosts: arg(&positional, 2, "hosts")?.parse()?,
             script_out: PathBuf::from(arg(&positional, 3, "script-out path")?),
+            write_model,
+            edit_model,
+            research_model,
         },
         _ => bail!(USAGE),
     };
@@ -148,4 +163,4 @@ usage:
   run_smoke list-voices
   run_smoke fetch-voices
   run_smoke synth  <script> <hosts> <output> [voice ...] [--cancel-after S] [--gpu N]
-  run_smoke script <source> <hosts> <script-out>         [--cancel-after S]";
+  run_smoke script <source> <hosts> <script-out>         [--cancel-after S] [--model M] [--edit-model M] [--research-model M]";

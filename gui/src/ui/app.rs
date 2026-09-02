@@ -25,6 +25,14 @@ use crate::ui::script_page::ScriptPage;
 use crate::ui::settings_page::SettingsPage;
 use crate::ui::status_log::{log_status, LogLevel, StatusLog};
 
+/// How long the run view stays up after a successful run, so its dot matrix
+/// can retreat before the launcher comes back.
+///
+/// Matches the `--dissolve-out` duration in the stylesheet. Leaving should not
+/// be ceremonious: the entry is an event worth watching, the exit is just
+/// getting out of the way.
+const EXIT_DISSOLVE: Duration = Duration::from_millis(500);
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Run,
@@ -238,7 +246,7 @@ async fn drive_run(mut state: AppState, req: RunRequest) {
     let gpu = state.config.peek().device.gpu_mask.clone();
     let gpu = if gpu.is_empty() { None } else { Some(gpu) };
 
-    state.run.write().begin(Instant::now());
+    state.run.write().begin(Instant::now(), req.kind.stages());
     state.log.write().clear();
     log_status(
         &mut state.log,
@@ -290,7 +298,23 @@ async fn drive_run(mut state: AppState, req: RunRequest) {
     }
 
     state.pgid.set(None);
+    let completed = matches!(outcome, RunOutcome::Completed);
     finish_run(state, req, paths, started_at, started.elapsed(), outcome);
+
+    // Hold the dark run view for the length of its exit dissolve, then clear
+    // the stage so the Run page falls back to the launcher.
+    //
+    // Only on success. A failed or cancelled run keeps its view up, with the
+    // reason in it, until it is dismissed — the outcome is the one thing worth
+    // interrupting for, and animating it away would be the app tidying up
+    // after itself before it had been read.
+    //
+    // A gated run navigates to the Script page instead and never sees this;
+    // clearing the stage anyway is harmless and keeps the state honest.
+    if completed {
+        tokio::time::sleep(EXIT_DISSOLVE).await;
+        state.run.write().stage = None;
+    }
 }
 
 /// Record the run and decide what the UI does next.
@@ -320,6 +344,7 @@ fn finish_run(
         voices: req.voices.clone(),
         device: snapshot.device.clone(),
         model: snapshot.model.clone(),
+        research_model: snapshot.research_model.clone(),
         started: Some(started_at),
         finished: Some(chrono::Local::now()),
         elapsed_secs: Some(elapsed.as_secs()),
