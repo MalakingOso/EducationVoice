@@ -53,6 +53,8 @@ python article2pod.py article.txt --length "10 minutes"   # explicit steer
 | `--length` | auto | Optional length steer; by default the article's density sets it |
 | `--tone` | conversational and engaging | Script tone |
 | `--model` | claude-sonnet-5 | Claude model used for script generation |
+| `--edit-model` | claude-opus-5 | Claude model for the creative-director edit pass |
+| `--research-model` | claude-sonnet-5 | Claude model for the researcher sub-agent the writer delegates literature sweeps to |
 | `--output` | output/podcast.wav | Output file (.wav or .mp3) |
 | `--script-only` | off | Skip TTS, print script to stdout |
 | `--from-script` | none | Synthesize an existing script file, skipping generation |
@@ -125,10 +127,12 @@ once TTS starts — a real step count, so a long run is visibly working rather
 than merely silent. Cancel signals the whole process group, which is what stops
 the `claude` grandchild along with it.
 
-The Run page is a drop target, a toggle and a button, and nothing else: drop a
-PDF or text file on it, drag in a link from a browser, or pick a file with
-Browse. There is no field to type into — whatever is chosen shows as a chip
-with the full path or link under it. Everything set
+The Run page is laid out as a launcher: the mark and the name, a drop zone,
+and one row holding the toggle and the Start button, centred as a group. Drop a
+PDF or text file on the zone, drag in a link from a browser, or pick a file
+with Browse. There is no field to type into. Whatever is chosen shows large in
+the zone with the full path or link under it, and a refused drop (a folder, a
+.docx) says why in the same place, so nothing beneath the zone moves. Everything set
 once — hosts, voices, the GPU, the run log — lives in Settings. Tone and length
 are not exposed and are not passed; the CLI's own defaults are what the GUI
 means by them, and omitting `--length` is what selects "let the article decide"
@@ -139,7 +143,7 @@ article rather than after its filename. Any row can be renamed in place, which
 is what makes the automatic naming safe to be imperfect — including for
 episodes that predate the GUI and have no run record at all.
 
-The window is undecorated and opens at 880×680 with no resize grips of its
+The window is undecorated and opens at 880×760 with no resize grips of its
 own; resize it with the window manager's own gesture (`Alt`/`Super` +
 right-drag on X11).
 
@@ -212,6 +216,14 @@ The CLI gained three flags for the GUI, all additive and all off by default:
 python article2pod.py --from-script scripts/rotbigs.txt \
     --output output/ep.wav --progress-json | jq -c .
 ```
+
+Inside the script stage the child also reports which phase it is in, as
+`{"event":"phase","stage":"script","phase":"researching"}` with `writing` and
+`editing` following. It is read off the shape of the SDK stream (tool calls
+mean the writer is in the literature; a long tool-free message is the plan,
+and the script comes next) so it is a landmark rather than a measurement,
+and the GUI shows it on the run strip's detail line only. Without the flag
+the same landmarks print to stderr.
 
 `--progress-json` also buys one extra API call: during ingest, Haiku is asked
 for the article's title in a single turn, and the answer arrives as
