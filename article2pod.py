@@ -8,8 +8,10 @@ import sys
 from pathlib import Path
 
 import anyio
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
-from claude_agent_sdk.types import AssistantMessage, TextBlock
+from claude_agent_sdk import (
+    query, ClaudeAgentOptions, AgentDefinition, ResultMessage,
+)
+from claude_agent_sdk.types import AssistantMessage, TextBlock, ToolUseBlock
 import requests
 from bs4 import BeautifulSoup
 
@@ -25,6 +27,13 @@ SCRIPT_MODEL = "claude-sonnet-5"
 # existing draft, which is where Opus's density earns its keep instead of
 # hurting.  Override per-run with --edit-model.
 EDIT_MODEL = "claude-opus-5"
+
+# Claude model for the researcher, the sub-agent the writer sends into the
+# literature.  A sweep is a dozen small tool calls and a report, which is
+# retrieval and summary rather than reasoning; the writer reads the report
+# with whatever depth its own model has.  Override per-run with
+# --research-model.
+RESEARCH_MODEL = "claude-sonnet-5"
 
 # The model that answers "what is this article called?".  Deliberately the
 # cheapest one: naming a row in a library is not a reasoning problem, and this
@@ -161,6 +170,12 @@ TITLE_EXCERPT_CHARS = 4000
 TEXT_TITLE_TURNS = 2
 PDF_TITLE_TURNS = 8
 
+# The SDK reads the CLI's stdout one JSON message at a time and refuses any
+# message over this many bytes (its default is 1 MiB).  Claude reads the PDF
+# itself, so a Read result carries the whole file inline; a 600 KB paper
+# already blows the default.  64 MiB covers anything we'd sensibly hand it.
+SDK_MAX_BUFFER_BYTES = 64 * 1024 * 1024
+
 _SPEAKER_LINE = re.compile(r"^Speaker \d+\s*:", re.I)
 
 
@@ -243,6 +258,7 @@ def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | N
                 allowed_tools=tools,
                 disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
                 permission_mode="bypassPermissions",
+                max_buffer_size=SDK_MAX_BUFFER_BYTES,
             ),
         ):
             if isinstance(message, AssistantMessage):
@@ -268,79 +284,118 @@ def fetch_title(article: str, is_pdf: bool, model: str = TITLE_MODEL) -> str | N
 # Script generation via Claude
 # ---------------------------------------------------------------------------
 
+# What the researcher may call.  The writer's own lookup set minus the
+# library-docs tools, which have nothing to say about a clinical paper, and
+# minus Agent, so a researcher never spawns a researcher.
+RESEARCHER_TOOLS = [
+    "Read",
+    "WebSearch",
+    "WebFetch",
+    "mcp__claude_ai_PubMed__search_articles",
+    "mcp__claude_ai_PubMed__get_full_text_article",
+    "mcp__claude_ai_PubMed__get_article_metadata",
+    "mcp__claude_ai_PubMed__find_related_articles",
+]
+RESEARCHER_MAX_TURNS = 25
+
+# The researcher's standing orders.  The writer dictates the shape of each
+# answer in its request; this is only what holds regardless of the request.
+# `{paper_access}` is one of the two sentences below, chosen by whether the
+# paper is a file the researcher could open.
+RESEARCHER_PROMPT = """\
+You are the research desk for a writer turning a medical paper into a \
+podcast script for surgical fellows. The writer has read the paper and \
+sends you questions about the literature around it; you go and look, and \
+you come back with what they asked for.
+
+- Answer in the form the request asks for. If it names none, keep it \
+tight: short sections, one line per source.
+- Every claim carries its source: first author and year, plus a PMID, DOI \
+or URL. A claim you could not verify is listed as unverified rather than \
+dropped or dressed up.
+- Search wide before you answer: several PubMed queries with different \
+terms, author names and related conditions; WebSearch for guideline \
+updates and recent developments; the full text when an abstract is not \
+enough.
+- Work from the request. The writer has already read the paper and tells \
+you what it says, so you do not read it again to get started. {paper_access}
+- Report and stop. No advice on the episode, no dialogue."""
+
+PAPER_ACCESS_PDF = (
+    "If a request is too thin to act on, the paper is at {path}; read the "
+    "part you need and no more."
+)
+PAPER_ACCESS_TEXT = (
+    "You have no copy of the paper. If a request is too thin to act on, "
+    "say so at the top of your report and answer what you can."
+)
+
 SYSTEM_PROMPT = """\
-You write podcast scripts from medical articles \
-Audience: surgical fellows. Peer-to-peer level. \
-Assume full command of medical terminology, anatomy, pharmacology, and \
-statistics. Do not simplify \
-jargon any surgical trainee would know. \
-Do not reference the audience level in the script.
+You write podcast scripts from medical articles for surgical fellows. \
+Peer-to-peer: assume full command of medical terminology, anatomy, \
+pharmacology, and statistics, and do not simplify anything a surgical \
+trainee already knows. The audience is never mentioned in the script.
 
-VOICE — hard rules:
-- Never open with affirmations ("Certainly", "Absolutely", "Of course", \
-"Great question", "Sure", "Happy to help").
-- Never use AI framing: "It's important to note", "It's worth noting", \
-"In conclusion", "In summary", "In essence", "Let's explore", \
-"Let's unpack", "Let's delve into".
-- No meta-commentary ("This is a complex topic", "There are several \
-factors to consider").
-- No bullet-list cadence — write in natural conversational prose.
-- Don't define things by what they're not ("X, not Y") — state the claim \
-and stop.
-- Disagree flatly, the way a colleague does, not with hedges ("I'd push \
-back", "to be fair").
-- Write the way two people actually talk to each other — loose, \
-specific, unrehearsed.
-- Do not end turns on a rhetorical flourish or a summarizing kicker. \
-Real people trail off, hand over mid-thought, or just stop.
+HOW THE HOSTS TALK:
+All {num_hosts} speakers are experts and there is no lead. They talk the \
+way colleagues talk when nobody else is listening: loose, specific, \
+unrehearsed, sure of themselves. A claim is stated and left standing. \
+Disagreement is flat and immediate, the opposing thing said outright and \
+the conversation moving on. A reaction is to the substance of what was \
+just said. A point lands on its own, with nothing announcing it and \
+nothing wrapping it up. A turn ends where the thought ends: people trail \
+off, hand over mid-sentence, or just stop. Em dashes are welcome; they \
+mark the breaks and pick-ups of real speech and help the reader hear the \
+flow.
 
-FORMAT:
-- Output ONLY the script — no preamble, commentary, or files. Do not \
-use the Write or Edit tools.
-- Every line: Speaker N: dialogue text (N from 1 to {num_hosts})
-- All speakers are experts, there is no lead. 
-{length_guidance}
-- Tone: {tone}.
-- No stage directions, sound effects, or [brackets].
+Two things this voice never does, because they are the fingerprint of \
+generated dialogue:
+- Defining something by what it is not ("X, not Y", "it isn't A, it's \
+B", "not just X but Y"). State the claim and stop.
+- Hedging into a disagreement ("I'd push back", "to be fair", "that \
+said"). Say the opposing thing directly.
 
 RHYTHM:
-- Let the content set the pace. A turn runs as long as the thought \
-needs and stops when it is finished — a few words when someone is \
-reacting, a full paragraph when a mechanism or a study design genuinely \
-needs unpacking. Do not ration either one.
-- The only thing to avoid is the shape where two people alternate \
-speeches of similar length. Real conversation is lopsided and uneven.
-- Interrupt for real: half-sentence reactions, corrections that land \
+- The content sets the pace. A turn runs as long as the thought needs: a \
+few words when someone is reacting, a full paragraph when a mechanism or \
+a study design needs unpacking. Neither is rationed.
+- Real conversation is lopsided and uneven. The one shape to avoid is two \
+people alternating speeches of similar length.
+- Interruptions are real: half-sentence reactions, corrections that land \
 before the other host finishes, someone picking up a thread from two \
 turns back.
-- Open a turn by reacting to what was just said rather than starting a \
-new topic cold. Let disagreements sit unresolved when they would in \
-life.
+- A turn opens by reacting to what was just said rather than starting a \
+new topic cold. Disagreements sit unresolved when they would in life.
+- Tone: {tone}.
+{length_guidance}
 
-RESEARCH (do this BEFORE writing):
-- Conduct a thorough background review — multiple PubMed queries \
-(different keywords, author names, related conditions), Scholar Gateway \
-for methods/drugs/devices/protocols, WebSearch for guideline updates \
-and recent developments. This is not optional.
-- The research is for you, the writer — not for the listener. It is what \
-lets the hosts sound like people who already know this literature. Most \
-of it should never be said aloud \
-
+RESEARCH (before anything else):
+- Read the paper. Then send the researcher agent on one broad sweep of \
+the literature around it: the trials it builds on or contradicts, the \
+guideline position, the numbers everyone quotes, where honest experts \
+still disagree, what it leaves open. This is not optional. The \
+researcher has not read the paper, so your request carries what it \
+needs: the question, the design, the population, the headline result, \
+and the form you want the answer in.
+- Send the researcher again whenever a question would take more than a \
+couple of lookups; several requests at once is fine. For one specific \
+thing you are unsure of while writing, look it up yourself.
+- The research is for you, the writer. It is what lets the hosts sound \
+like people who already know this literature. Most of it is never said \
+aloud.
 - Name a study only when it changes how you read THIS paper: it \
 contradicts the result, it is the trial this one aims to displace, it \
 explains a design choice, or it is the guideline this would change. Two \
-or three named sources in an episode is normal. 
+or three named sources in an episode is normal, and a section with no \
+external reference is fine.
+- A named source is first author plus year, or the trial name. Vague \
+attribution ("some studies show", "the literature suggests") never \
+appears.
 
-- When you do name a source, use first author + year (e.g., "the Smith \
-2023 trial in JAMA") or the trial name (e.g., "the RECOVERY trial"). \
-Never "some studies show" or "the literature suggests".
-- Do not distribute citations for coverage. A section with no external \
-reference is fine.
-
-PLAN THE EPISODE (after research, before you write any dialogue):
+PLAN THE EPISODE (after research, before any dialogue):
 Work this through out loud, in a message of its own. It is thinking, not \
-output — the listener never sees it, so be blunt and be willing to \
-throw things away.
+output. The listener never sees it, so be blunt and be willing to throw \
+things away.
 
 1. BRAINSTORM WIDELY. Put up five to eight genuinely different angles \
 the episode could take. Cast a wide net: the argument the paper is \
@@ -350,7 +405,7 @@ current practice got established and why it stuck; the number that \
 contradicts what everyone does; the question the paper conspicuously \
 fails to answer; the disagreement two honest experts would still have \
 after reading it. These should be real alternatives that would produce \
-noticeably different episodes — not one idea phrased five ways. Do not \
+noticeably different episodes, never one idea phrased five ways. Do not \
 settle on anything yet.
 
 2. REFLECT ON EACH, HONESTLY. For every angle, say what makes it \
@@ -359,7 +414,7 @@ sustain it for a whole episode, or does it run dry after four minutes? \
 Does it need numbers the paper does not report? Would it require the \
 hosts to explain background that is more boring than the payoff? Is it \
 interesting to a surgical fellow, or only to a methodologist? Name the \
-weaknesses plainly — an angle you talk yourself into is the one that \
+weaknesses plainly. An angle you talk yourself into is the one that \
 produces a flat episode.
 
 3. NARROW. Choose the spine of the episode and say why it beat the \
@@ -368,23 +423,22 @@ opening hook, the point where the argument turns, the thing a listener \
 should still remember tomorrow. Note anything from the discarded angles \
 worth keeping as a beat along the way.
 
-4. WRITE THE SCRIPT. Your final message must contain the script and \
-nothing else — no plan, no headings, no commentary, just Speaker lines.
-
-CONTENT:
-- Study every table and figure before you write — but report only what \
-changes a decision: the effect big enough to act on, the number that \
-surprises, the subgroup where the answer flips, the confidence interval \
-that undercuts the headline. Do not walk a table row by row. If a \
+WRITE:
+- Study every table and figure first, then report only what changes a \
+decision: the effect big enough to act on, the number that surprises, \
+the subgroup where the answer flips, the confidence interval that \
+undercuts the headline. A table is never walked row by row. If a \
 figure's message is one sentence, say the sentence and move on.
-- Never drop more than two statistics in a row without a plain-language \
-clinical interpretation. After citing a number, say what it means for the \
-patient or the surgeon's decision — e.g., "So roughly one in six women \
-avoided incontinence thanks to the sling" or "That's a one-in-fifteen \
-chance of a trocar going through the bladder — not trivial for a \
-prophylactic procedure." Stats without interpretation are noise.
-- Natural conversation: "Wait, so you're saying...", "Right, exactly", \
-genuine pushback and questions between hosts."""
+- Every statistic gets a plain-language clinical reading close behind \
+it: what the number means for the patient in front of you, or for the \
+decision the surgeon makes. Never more than two numbers in a row \
+without one.
+
+FORMAT:
+- Your final message is the script and nothing else: no plan, no \
+headings, no commentary. Do not use the Write or Edit tools.
+- Every line: Speaker N: dialogue text, with N from 1 to {num_hosts}.
+- No stage directions, sound effects, or [brackets]."""
 
 
 # Default: no word count, no duration, no turn count.  The episode runs as
@@ -395,138 +449,109 @@ LENGTH_BY_DENSITY = """\
 - Length: let the article decide. A dense paper with fifty procedure \
 estimates and a real methodological weakness earns a long episode; a \
 thin one earns a short one. There is no target duration and no word \
-count. Cover what is worth covering, at the pace it deserves, and stop \
+count. Cover what is worth covering at the pace it deserves, and stop \
 when you are done rather than filling to a quota.
-- Aim for a calm, unhurried listen — the kind of conversation someone \
-can follow on a commute and come away actually understanding the paper. \
-Never rush a point to save time and never stretch one to fill time."""
+- The target is a calm, unhurried listen, the kind of conversation \
+someone can follow on a commute and come away understanding the paper. \
+A point is never rushed to save time and never stretched to fill it."""
 
 
-# Overused in AI-generated text, sounds formulaic in spoken dialogue.  Lives
-# here rather than inline in EDITOR_SYSTEM_PROMPT so it is defined once and
-# interpolated, not duplicated between the writer and editor prompts.
-DISCOURAGED_VOCABULARY = """\
-a journey of, a multitude of, a plethora of, a testament to, actionable \
-insights, adept, adoption rate, aforementioned, agile, ai-powered, \
-aligns, ample opportunities, amplify, arduous, as such, at length, \
-at the end of the day, augment, bandwidth, based on the information \
-provided, best practices, blockchain-enabled, brand awareness, broadly \
-speaking, burgeoning, cannot be overstated, capacity building, \
-captivating, change management, cloud-based, cognizant, collaborative \
-environment, commendable, competitive landscape, complexity, \
-conceptualize, considerable, continuous improvement, core, cost \
-optimization, craft, critical, customer-centric, data-driven, \
-decision-makers, deep understanding, deliverables, delve, delved, \
-delving, demonstrates significant, deployment plan, digital realm, \
-digital transformation, disruptive innovation, domain expertise, \
-downtime, drive, driven approach, driving innovation, dynamic, dynamic \
-environment, efficiency, embark, embark on a journey, embarked, emerging \
-technologies, enable, encountered hurdles, enhance, enhancing, \
-enlightening, enriches, entails, entrenched, epicenter, essentially, \
-esteemed, ethical considerations, ever-evolving, excels, exciting, \
-exemplary, expertise, explore, facilitate, flourishing, folks, foray, \
-foster innovation, fostering, fresh perspectives, from inception to \
-execution, fundamental, fundamentally, future-proof, game changer, \
-generally speaking, given that, glean, going forward, golden ticket, \
-governance framework, granular detail, granular level, granularly, \
-grasp, growing recognition, hinder, holistically, impactful, \
-implementation strategy, implications, important to consider, in a sea \
-of, in brief, in detail, in effect, in general, in light of, in other \
-words, in particular, in practice, in terms of, in the dynamic world of, \
-in the realm of, in theory, in today's rapidly evolving market, \
-in today's world, industry best practices, influencers, innovative, \
-insights into, invaluable, issue resolution, it's important to \
-remember, iteration, kaleidoscope, key, key takeaways, knowledge \
-transfer, kpis, latency, linchpin, low-level, manifold, market \
-penetration, market share, market trends, maximize, milestone, \
-mission-critical, moving forward, mvp, namely, navigating the landscape, \
-navigating the complexities of, nevertheless, new heights, \
-next-generation, notable, numerous, offer a comprehensive, offerings, \
-on the ascent to, on the contrary, on the cutting edge, on the other \
-hand, operational efficiency, operational excellence, pain point, \
-paradigm shift, particularly in areas, performance optimization, \
-pervasive, pivotal, plethora, preemptively, primary, problem solving, \
-process optimization, profitability, profound, promote, pronged, quality \
-assurance, quality control, rapidly evolving, reaching new heights, \
-realm, recognize, regulatory compliance, relentless, remarkable, \
-resonate, resource allocation, resource optimization, revenue growth, \
-risk mitigation, roadmap, robust, roi, root cause analysis, scalable, \
-scrum, seamless, secondary, shed light, shedding light on, showcasing, \
-significant, significantly contributes, simply put, sla, solution \
-development, specifically speaking, sprint, stakeholders, \
-state-of-the-art, strategic alignment, streamline, strive, strong \
-presence, subject matter experts, substantial, substantially, \
-sustainability, synergistically, synergy, systemic, tailor, tapestry, \
-tco, tertiary, that being said, the future of, the linchpin of, \
-the next frontier, the power of, the road ahead, thereby, therefore, \
-therein, thereof, thought leaders, thought leadership, \
-thought-provoking, thrive, thriving, throughput, time optimization, \
-to clarify, to demonstrate, to elucidate, to emphasize, to enrich, \
-to exemplify, to furnish, to highlight, to illustrate, to maximize, \
-to provide, to reiterate, to shed light on, to showcase, to summarize, \
-to thrive, to underscore, to unleash, to unlock, touchpoint, \
-transformation, transformative, transforming the way, treasure trove, \
-ultimately, uncharted waters, undeniable, underscores, understanding of \
-your unique, undoubtedly, unleash, unlock, unparalleled, uptime, \
-user engagement, user experience, user feedback, user interface, \
-utilize, utmost, valuable, value proposition, value-added, various, \
-vast, vibrant, vital, well-crafted, whilst, whilst it is true, \
-widely recognized, with a keen eye on, with regards to."""
-
-
+# The editor is the negative half of the pair.  The writer prompt describes
+# what good dialogue sounds like and carries only the two bans proven to
+# work at draft stage; every other tell is named here, as a sentence shape
+# rather than a word list, because a banned word gets replaced by a synonym
+# and a banned shape actually changes the rhythm.
 EDITOR_SYSTEM_PROMPT = """\
-You're the creative director for this podcast, brought in after a writer has \
-already produced a full draft. Nobody hired you to check spelling. Your job \
-is the one thing a director does that nobody else does: listen to a scene \
-and know, in your gut, whether it plays like two people talking or like a \
-script being performed as two people. You have a trained ear for exactly \
-where the artifice shows.
+You're the creative director for this podcast, brought in after a writer \
+has already produced a full draft. Nobody hired you to check spelling. \
+Your job is the one thing a director does that nobody else does: listen \
+to a scene and know, in your gut, whether it plays like two surgeons \
+talking or like a script being performed as two surgeons. You have a \
+trained ear for exactly where the artifice shows.
 
-THE BIGGEST TELL: any line that defines something by what it ISN'T instead \
-of just saying what it IS. "X, not Y." "It isn't A, it's B." "Not just X \
-but Y." "What I'd say is—." "The real question isn't X, it's Y." This \
-construction barely occurs in real conversation — it's a model hedging \
-toward precision instead of committing to a claim. Every time you find it, \
-kill the negated half and keep only the assertion.
+THE TELLS, in order of how badly they break the illusion:
 
-SECOND: rehearsed disagreement. "I'd push back on that." "To be fair—." \
-"That said—." "I hear you, but—." "Where I'd differ is—." Nobody talks to a \
-colleague like this. Real disagreement is flat: "That's overselling it." "I \
-don't buy it." "The data doesn't support that." Find the hedge, cut the \
-throat-clearing, keep the objection.
+1. Defining by negation. A line that says what something ISN'T on the \
+way to saying what it is: "X, not Y", "it isn't A, it's B", "not just X \
+but Y", "the real question isn't X, it's Y". This construction barely \
+occurs in speech; it is a model hedging toward precision instead of \
+committing to a claim. Kill the negated half and keep the assertion.
 
-THIRD: pitch-deck vocabulary leaking into a conversation between two \
-surgeons. Anything on this list reads as corporate or generated, never \
-spoken: {discouraged_vocabulary}
-Where a line uses one of these, don't swap in a synonym and call it fixed — \
-that just moves the seam to a different word. Rewrite the sentence the way \
-this person would actually say the thing underneath it.
+2. Rehearsed disagreement. A hedge or a throat-clear in front of an \
+objection: "I'd push back on that", "to be fair", "that said", "where \
+I'd differ is". Real disagreement is flat: "That's overselling it." "I \
+don't buy it." "The data doesn't support that." Cut the wind-up, keep \
+the objection.
 
-ALSO WATCH FOR: affirmation openers ("Certainly", "Great question"), AI \
-framing ("it's important to note", "in summary"), meta-commentary about the \
-topic being complex, bullet-list cadence dressed as sentences, and turns \
-that end on a tidy rhetorical bow instead of trailing off or handing over \
-mid-thought the way real people do.
+3. The wind-up before a point. A phrase whose only job is to announce \
+that something important is coming: "here's the thing", "that's the \
+part that matters", "what gets me is", "which is exactly why". The point \
+lands harder without it. Delete the announcement and start on the point.
+
+4. Hosts reviewing each other. A reaction aimed at how well the other \
+host put something rather than at what they said: "good catch", "that's \
+a real reframe", "that's the honest way to say it", "that's the whole \
+paper in one sentence". Colleagues respond to the substance or they \
+don't respond at all. Replace the line with a reaction that carries \
+content, or cut it.
+
+ALSO: affirmation openers ("Certainly", "Great question"), AI framing \
+("it's important to note", "in summary"), remarks about the topic being \
+complex, bullet-list cadence dressed as sentences, turns that end on a \
+tidy rhetorical bow, and any word that shows up in generated text and \
+never in a conversation between two surgeons. For that last one a \
+synonym swap just moves the seam; rewrite the sentence the way this \
+person would actually say the thing underneath it.
 
 HOW TO WORK:
 Read the whole script once, straight through, the way a listener would, \
-before touching anything. Notice every place the illusion breaks. Then go \
-back and fix only those places — a line that's already working doesn't \
-need your fingerprints on it.
+before touching anything. Notice every place the illusion breaks. Then \
+go back and fix those places. A line that already works doesn't need \
+your fingerprints on it, and em dashes are part of the voice, so leave \
+them.
 
-Rewrite in full sentences, in voice — never a word-for-word substitution. A \
-mechanical swap is exactly as detectable as what it replaced, just with a \
-different word in the slot.
+Rewrite in full sentences, in voice, never as a word-for-word \
+substitution. A mechanical swap is exactly as detectable as what it \
+replaced, with a different word in the slot.
 
-WHAT YOU MUST NOT TOUCH: every fact, number, citation, study name, and \
-clinical claim stays exactly as reported — you're editing performance, not \
-content. Keep exactly {num_hosts} speakers and the Speaker N: format. \
-Don't add material or cut substance.
+YOUR LICENCE:
+- Cut freely. A turn that carries nothing can go, or fold into the next \
+one. A substantive turn that repeats itself, or performs instead of \
+talks, can be trimmed.
+- Write freely. New reactions, connective tissue, and rephrasings are \
+yours to add so the cut edges join up in voice.
+- Cut for the conversation, never for the clock. There is no target \
+length. The episode should be a calm, unhurried listen that someone can \
+follow on a commute and come away understanding the paper. Remove what \
+is dead, redundant, or performed; leave what is working at its length, \
+even when it is long.
 
-Work through the script in a message of its own first, noting what you're \
-fixing and why — that's for the record, not the listener. Your final \
-message must contain only the corrected script: Speaker N: lines, nothing \
-else."""
+WHAT STAYS FIXED:
+- Every fact, number, citation, study name, and clinical claim stays \
+exactly as reported, and you introduce none that are not in the draft. \
+You are editing performance, not content.
+- The order of the argument. Beats stay where the writer put them.
+- Exactly {num_hosts} speakers and the Speaker N: format.
+
+Work through the script in a message of its own first, noting what \
+you're fixing and why. That is for the record, not the listener. Your \
+final message must contain only the corrected script: Speaker N: lines, \
+nothing else."""
+
+
+# Human wording for the `phase` events the script stage emits, keyed by the
+# wire name.  The GUI carries its own copy of these labels; the stderr line
+# uses this one.
+PHASE_LABELS = {
+    "researching": "Researching the literature",
+    "writing": "Writing the script",
+    "editing": "Editing the script",
+}
+
+# A tool-free prose message at least this long is taken to be the writer's
+# plan rather than a passing narration.  Plans run several thousand
+# characters; narration is a sentence.
+PLAN_MIN_CHARS = 1500
 
 
 def _run_pass(
@@ -536,9 +561,25 @@ def _run_pass(
     allowed_tools: list[str],
     disallowed_tools: list[str],
     max_turns: int,
+    phase: str,
+    writing_phase: str | None = None,
     effort: str | None = None,
+    agents: dict[str, AgentDefinition] | None = None,
 ) -> str:
     """Run one query() to completion and return its selected raw text.
+
+    `agents`, if given, are sub-agents the model may delegate to through the
+    Agent tool (which must be in `allowed_tools` for that to happen).  Their
+    own turns arrive in the same stream, tagged with the tool use that
+    spawned them, and are skipped here: a researcher's report is a long
+    tool-free prose message, which is exactly the shape the plan detection
+    below keys on, and its narration is not the writer's.
+
+    `phase` names what the pass is doing when it starts and whenever it is
+    calling tools ("researching" for the writer).  `writing_phase`, if given,
+    is announced once a substantial tool-free prose message arrives: for the
+    writer that is the brainstorm/reflect/narrow plan, and the script is
+    what comes next.  The editor has no such turn, so it stays in one phase.
 
     Shared by the writer and editor passes in generate_script.  Selection is
     by *shape* rather than length: both passes think out loud in a message of
@@ -551,6 +592,17 @@ def _run_pass(
     script_re = re.compile(r"^Speaker \d+:", re.M)
     candidates: list[str] = []
     longest_text = ""
+    current_phase: str | None = None
+
+    def set_phase(name: str) -> None:
+        nonlocal current_phase
+        if name == current_phase:
+            return
+        current_phase = name
+        print(f"{PHASE_LABELS[name]}...", file=sys.stderr)
+        emit("phase", stage="script", phase=name)
+
+    set_phase(phase)
 
     async def _run():
         nonlocal longest_text
@@ -564,15 +616,39 @@ def _run_pass(
                 disallowed_tools=disallowed_tools,
                 permission_mode="bypassPermissions",
                 effort=effort,
+                max_buffer_size=SDK_MAX_BUFFER_BYTES,
+                agents=agents,
             ),
         ):
             if isinstance(message, AssistantMessage):
+                if message.parent_tool_use_id is not None:
+                    continue
                 text_parts = [
                     block.text for block in message.content
                     if isinstance(block, TextBlock)
                 ]
+                uses_tools = any(
+                    isinstance(block, ToolUseBlock) for block in message.content
+                )
+                if uses_tools:
+                    # Any tool call means the model is back in the literature,
+                    # whatever prose preceded it.
+                    set_phase(phase)
                 if text_parts:
                     candidate = "\n".join(text_parts)
+                    # The plan is the one long, tool-free prose message; the
+                    # script follows it.  The length floor is what stops a
+                    # one-line "let me search for..." narration (the CLI
+                    # streams text and tool blocks as separate messages)
+                    # from flipping the phase early.  A wrong flip corrects
+                    # itself on the next tool call anyway.
+                    if (
+                        writing_phase
+                        and not uses_tools
+                        and not script_re.search(candidate)
+                        and len(candidate) >= PLAN_MIN_CHARS
+                    ):
+                        set_phase(writing_phase)
                     # Emitted as it arrives, not at the end: this is the only
                     # window into an otherwise silent multi-minute call, and
                     # it is where the brainstorm/reflect/narrow reasoning (or
@@ -609,11 +685,17 @@ def generate_script(
     model: str = SCRIPT_MODEL,
     edit_model: str = EDIT_MODEL,
     draft_out: Path | None = None,
+    research_model: str = RESEARCH_MODEL,
 ) -> str:
     """Generate a podcast script from article text using Claude Agent SDK.
 
     Two sequential calls: a writer pass that researches and drafts, then a
     fresh creative-director pass that edits the draft for AI-sounding tells.
+    The writer does not do the broad literature sweep itself: it delegates
+    that to a researcher sub-agent on `research_model`, which keeps a dozen
+    search results out of the writer's context and lets a cheaper model do
+    the retrieval.  The writer keeps its own lookup tools for the one
+    specific question it hits mid-write.
     Fresh eyes matter here — the model that just wrote a stilted line is poor
     at noticing its own tic, so the editor is a separate model instance with
     no memory of drafting it.  `draft_out`, if given, gets the writer's
@@ -633,15 +715,13 @@ def generate_script(
         length_guidance=length_guidance,
     )
 
+    # One sentence, deliberately.  The process (research, plan, write) is
+    # specified once, in SYSTEM_PROMPT; this is a reminder in the user turn
+    # that it applies, and it must not restate the steps in different words
+    # or the two drift apart.
     research_instruction = (
-        "First, research the topic using PubMed, Scholar Gateway, and web "
-        "search to find related studies and background context. Then write "
-        "the podcast script. Read every table and figure, but discuss only "
-        "what changes a clinical decision.\n\n"
-        "Before writing, brainstorm several different angles the episode "
-        "could take, reflect out loud on what works and what does not "
-        "about each, and narrow to the one you think makes the most "
-        "compelling piece. Then write the script as your final message."
+        "Research the literature and plan the episode before you write a "
+        "line of dialogue; the script is your final message."
     )
 
     if is_pdf:
@@ -656,15 +736,39 @@ def generate_script(
         )
 
     print("Generating podcast script with Claude...", file=sys.stderr)
-    emit("stage", stage="script", status="start", model=model)
+    emit(
+        "stage", stage="script", status="start",
+        model=model, research_model=research_model,
+    )
 
-    # Allow enough turns for: reading PDF (multiple pages) + research
-    # lookups + brainstorm/reflect/narrow + script generation
+    paper_access = (
+        PAPER_ACCESS_PDF.format(path=article_text) if is_pdf
+        else PAPER_ACCESS_TEXT
+    )
+    researcher = AgentDefinition(
+        description=(
+            "Searches the medical literature around the paper and reports "
+            "back with cited findings, in whatever form the request asks for."
+        ),
+        prompt=RESEARCHER_PROMPT.format(paper_access=paper_access),
+        tools=RESEARCHER_TOOLS,
+        disallowedTools=["Write", "Edit", "Bash", "NotebookEdit", "Agent"],
+        model=research_model,
+        maxTurns=RESEARCHER_MAX_TURNS,
+        effort="high",
+    )
+
+    # Allow enough turns for: reading PDF (multiple pages) + researcher
+    # delegations + a few direct lookups + brainstorm/reflect/narrow +
+    # script generation.  A delegation costs one turn however many
+    # searches the researcher runs.
     draft_raw = _run_pass(
         system=system,
         user_msg=user_msg,
         model=model,
+        agents={"researcher": researcher},
         allowed_tools=[
+            "Agent",
             "Read",
             "WebSearch",
             "WebFetch",
@@ -677,6 +781,8 @@ def generate_script(
         ],
         disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
         max_turns=30,
+        phase="researching",
+        writing_phase="writing",
         # Highest reasoning depth for the writer pass — this is the research
         # + brainstorm/reflect/narrow + write call, where more thinking has
         # room to pay off. xhigh is a real effort level on Sonnet 5 (not
@@ -690,11 +796,7 @@ def generate_script(
         draft_out.write_text(draft, encoding="utf-8")
         print(f"Draft (pre-edit) saved: {draft_out}", file=sys.stderr)
 
-    print("Editing script with Claude...", file=sys.stderr)
-    editor_system = EDITOR_SYSTEM_PROMPT.format(
-        discouraged_vocabulary=DISCOURAGED_VOCABULARY,
-        num_hosts=num_hosts,
-    )
+    editor_system = EDITOR_SYSTEM_PROMPT.format(num_hosts=num_hosts)
     # Closed-book text pass — no tools needed, everything it needs is already
     # in the draft.
     edited_raw = _run_pass(
@@ -704,6 +806,7 @@ def generate_script(
         allowed_tools=[],
         disallowed_tools=["Write", "Edit", "Bash", "NotebookEdit"],
         max_turns=5,
+        phase="editing",
     )
 
     return validate_script(edited_raw, num_hosts)
@@ -1040,6 +1143,10 @@ def main():
         "--edit-model", default=EDIT_MODEL,
         help="Claude model for the creative-director edit pass",
     )
+    parser.add_argument(
+        "--research-model", default=RESEARCH_MODEL,
+        help="Claude model for the researcher sub-agent the writer delegates to",
+    )
 
     voice_group = parser.add_mutually_exclusive_group()
     voice_group.add_argument(
@@ -1194,7 +1301,7 @@ def main():
     # Generate script
     script = generate_script(
         article, args.hosts, args.tone, args.length, is_pdf, args.model,
-        args.edit_model, draft_path,
+        args.edit_model, draft_path, research_model=args.research_model,
     )
 
     script_path.write_text(script, encoding="utf-8")
